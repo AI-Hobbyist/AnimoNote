@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AnimoNote</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <!-- 拖拽提示（仅在按住 Alt 时显示） -->
+    <div id="drag-hint" class="drag-hint hidden">
+        <span>🖱 拖拽移动</span>
+    </div>
+
+    <!-- 调试信息（可选，F3 切换） -->
+    <div id="debug-info" class="debug-info hidden">
+        <div id="debug-instance">Instance: --</div>
+        <div id="debug-channel">Channel: --</div>
+        <div id="debug-note">Note: --</div>
+        <div id="debug-fps">FPS: --</div>
+        <div id="debug-brightness">Brightness: 1.0x</div>
+    </div>
+
+    <!-- 亮度提示（调节时短暂显示） -->
+    <div id="brightness-hint" class="drag-hint hidden" style="bottom:60px">
+        <span id="brightness-text">☀️ 亮度: 1.0x</span>
+    </div>
+
+    <!--
+        导入映射：将 bare specifier "three" 映射到本地 node_modules 路径。
+        MMDLoader.js / MMDAnimationHelper.js 等依赖内部使用 import { ... } from 'three'，
+        浏览器无法解析 bare specifier，必须通过 importmap 提供映射。
+    -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "./node_modules/three/build/three.module.js",
+            "three/addons/": "./node_modules/three/examples/jsm/"
+        }
+    }
+    </script>
+
+    <!--
+        ★ 使用 type="module" 确保 import map 生效。
+        renderer.js 内部使用动态 import() 加载 Three.js ES modules，
+        MMDLoader.js / MMDAnimationHelper.js 依赖的 `import { ... } from 'three'`
+        通过上方的 import map 解析到本地 node_modules 路径。
+    -->
+    <script type="module" src="renderer.js"></script>
+</body>
+</html>

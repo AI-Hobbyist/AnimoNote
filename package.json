@@ -1,0 +1,18 @@
+{
+  "name": "animonote",
+  "version": "1.0.0",
+  "description": "AnimoNote - 桌面虚拟乐手系统 / Desktop Virtual Musician System",
+  "main": "control-center/main.js",
+  "scripts": {
+    "start": "electron control-center/main.js",
+    "start:control-center": "electron control-center/main.js"
+  },
+  "keywords": ["animonote", "mmd", "midi", "virtual-musician", "electron"],
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  }
+}
