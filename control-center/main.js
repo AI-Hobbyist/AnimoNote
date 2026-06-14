@@ -45,12 +45,22 @@ function createControlWindow() {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            webSecurity: false,
         },
     });
 
     controlWindow.maximize();
     controlWindow.once('ready-to-show', () => controlWindow.show());
-    controlWindow.loadFile(path.join(__dirname, 'index.html'));
+
+    // 开发模式：使用 Vite 开发服务器
+    // 生产模式：使用 Vite 构建后的文件
+    const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
+    if (isDev) {
+        controlWindow.loadURL('http://localhost:5173');
+        controlWindow.webContents.openDevTools();
+    } else {
+        controlWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
+    }
 
     controlWindow.on('closed', () => {
         controlWindow = null;

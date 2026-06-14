@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 
+naiveuidoc/
+
 # Build output
 dist/
 build/

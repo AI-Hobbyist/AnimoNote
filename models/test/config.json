@@ -1,0 +1,57 @@
+{
+    "instance_id": "test",
+    "display_name": "测试",
+    "midi": {
+        "device_name": "",
+        "channel": 1
+    },
+    "model": {
+        "pmx_path": "./test.pmx",
+        "vmd_path": "./actions/idle.vmd",
+        "scale": 1,
+        "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+        }
+    },
+    "window": {
+        "width": 600,
+        "height": 800,
+        "position": {
+            "x": 100,
+            "y": 100
+        },
+        "always_on_top": true,
+        "mouse_through_default": true,
+        "drag_modifier_key": "Alt"
+    },
+    "idle": {
+        "vmd_path": "./actions/idle.vmd",
+        "loop": true,
+        "blend_time": 0.3
+    },
+    "freestyle": {
+        "interval_seconds": 0
+    },
+    "blink": {
+        "enabled": true,
+        "min_interval": 2000,
+        "max_interval": 6000,
+        "duration": 120
+    },
+    "audio": {
+        "enabled": false,
+        "vocal_path": null
+    },
+    "physics": {
+        "enabled": true,
+        "gravity": -9.8,
+        "substeps": 3
+    }
+}
