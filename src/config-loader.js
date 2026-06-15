@@ -81,7 +81,19 @@ class ConfigLoader {
 
         // 6. 设置默认值
         config.midi_channel = config.midi_channel || 1;
+        config.root_note = config.midi?.root_note || config.root_note || 'C4';
         config.instance_id = config.instance_id || path.basename(modelDir);
+
+        if (!config.model) config.model = {};
+        if (config.model.scale === undefined) config.model.scale = 1.0;
+        if (!config.model.position) config.model.position = { x: 0, y: 0, z: 0 };
+        if (!config.idle) {
+            config.idle = {
+                vmd_path: path.resolve(modelDir, './idle.vmd'),
+                loop: true,
+                blend_time: 0.3
+            };
+        }
 
         return config;
     }
@@ -124,10 +136,6 @@ class ConfigLoader {
 
         if (!config.model || !config.model.pmx_path) {
             errors.push('Missing model.pmx_path');
-        }
-
-        if (!config.idle || !config.idle.vmd_path) {
-            errors.push('Missing idle.vmd_path');
         }
 
         if (config.midi_channel < 1 || config.midi_channel > 16) {

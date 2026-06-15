@@ -27,26 +27,32 @@
       </n-flex>
 
       <!-- LCD 状态屏 -->
-      <div v-if="runningInstances.has(model.id)" class="model-lcd" :class="{ 'lcd-fallback': inst?.isFallback }">
+      <div v-if="runningInstances.has(model.id)" class="model-lcd" :class="{ 'lcd-fallback': insts.get(model.id)?.isFallback }">
         <div class="lcd-row">
-          <span class="lcd-label">NOTE</span>
-          <span class="lcd-value lcd-note" :class="{ 'lcd-active': inst?.currentNote }">
-            {{ inst?.currentNote || '--' }}
+          <span class="lcd-label">CH</span>
+          <span class="lcd-value lcd-active">
+            {{ String(insts.get(model.id)?.midiChannel || model.midiChannel).padStart(2, '0') }}
           </span>
         </div>
         <div class="lcd-row">
-          <span class="lcd-label">{{ inst?.isFallback ? 'FALLBACK' : 'ACTION' }}</span>
-          <span class="lcd-value lcd-action" :class="{ 'lcd-active': inst?.currentAction }">
-            {{ inst?.currentAction ? inst.currentAction.replace('./actions/', '').replace('.vmd', '') : 'idle' }}
+          <span class="lcd-label">NOTE</span>
+          <span class="lcd-value lcd-note" :class="{ 'lcd-active': insts.get(model.id)?.currentNote }">
+            {{ insts.get(model.id)?.currentNote || '--' }}
+          </span>
+        </div>
+        <div class="lcd-row">
+          <span class="lcd-label">{{ insts.get(model.id)?.isFallback ? 'FALLBACK' : 'ACTION' }}</span>
+          <span class="lcd-value lcd-action" :class="{ 'lcd-active': insts.get(model.id)?.currentAction }">
+            {{ insts.get(model.id)?.currentAction ? insts.get(model.id).currentAction.replace('./actions/', '').replace('.vmd', '') : 'idle' }}
           </span>
         </div>
         <div class="lcd-row lcd-fps">
           <span class="lcd-label">FPS</span>
           <span
             class="lcd-value"
-            :style="{ color: inst?.fps ? (inst.fps >= 30 ? '#66bb6a' : '#ffca28') : 'rgba(255,255,255,0.15)' }"
+            :style="{ color: insts.get(model.id)?.fps ? (parseInt(insts.get(model.id).fps) >= 30 ? '#66bb6a' : '#ffca28') : 'rgba(255,255,255,0.15)' }"
           >
-            {{ inst?.fps || '--' }} fps
+            {{ insts.get(model.id)?.fps || '--' }} fps
           </span>
         </div>
       </div>
@@ -65,10 +71,8 @@ import {
 
 const emit = defineEmits(['scan'])
 
-const inst = computed(() => {
-  if (!selectedModelId.value) return null
-  return runningInstances.value.get(selectedModelId.value) || null
-})
+// 为每个模型计算其实例状态
+const insts = computed(() => runningInstances.value)
 
 function handleSelect(id) {
   selectModel(id)

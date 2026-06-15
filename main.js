@@ -16,6 +16,7 @@
 
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 // ============================================================
 // ⚡ GPU 加速配置（必须在 app.whenReady() 之前设置）
@@ -58,9 +59,27 @@ const MIDI_CHANNEL = parseInt(args.find(a => a.startsWith('--midi-channel='))?.s
 let mainWindow = null;
 
 function createWindow() {
+    // 尝试从 config.json 加载保存的位置
+    let savedX = undefined;
+    let savedY = undefined;
+    try {
+        const configPath = path.join(MODEL_DIR, 'config.json');
+        if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            if (config.window && config.window.x !== undefined && config.window.y !== undefined) {
+                savedX = config.window.x;
+                savedY = config.window.y;
+            }
+        }
+    } catch (e) {
+        console.error('[Main] Failed to load window position:', e.message);
+    }
+
     mainWindow = new BrowserWindow({
         width: 600,
         height: 800,
+        x: savedX,
+        y: savedY,
         transparent: true,                // ★ 关键：RGBA 背景透明
         frame: false,                     // 无边框
         alwaysOnTop: true,                // 置顶显示
@@ -89,6 +108,7 @@ function createWindow() {
     });
 
     // 默认：完全鼠标穿透
+    // ★ 关键：在 Windows 上，forward: true 可能会导致交互异常，先尝试最基础的 setIgnoreMouseEvents
     mainWindow.setIgnoreMouseEvents(true, { forward: true });
 
     // 可选：开发模式下打开 DevTools
@@ -102,11 +122,41 @@ function createWindow() {
 ipcMain.on('set-draggable', (event, draggable) => {
     if (mainWindow) {
         if (draggable) {
-            // 用户按住 Alt 键 → 允许鼠标交互（拖拽）
+            // 解除穿透，并允许通过 -webkit-app-region: drag 拖动
             mainWindow.setIgnoreMouseEvents(false);
         } else {
-            // 默认状态 → 鼠标穿透
+            // 恢复穿透
             mainWindow.setIgnoreMouseEvents(true, { forward: true });
+        }
+    }
+});
+
+ipcMain.on('window-move', (event, { deltaX, deltaY }) => {
+    if (mainWindow) {
+        const [x, y] = mainWindow.getPosition();
+        // 修正：确保 delta 是整数
+        mainWindow.setPosition(Math.round(x + deltaX), Math.round(y + deltaY));
+    }
+});
+
+ipcMain.on('save-window-position', () => {
+    if (mainWindow) {
+        const [x, y] = mainWindow.getPosition();
+        try {
+            const configPath = path.join(MODEL_DIR, 'config.json');
+            let config = {};
+            if (fs.existsSync(configPath)) {
+                config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            }
+            
+            if (!config.window) config.window = {};
+            config.window.x = x;
+            config.window.y = y;
+            
+            fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
+            console.log(`[Main] Saved window position: ${x}, ${y}`);
+        } catch (e) {
+            console.error('[Main] Failed to save window position:', e.message);
         }
     }
 });

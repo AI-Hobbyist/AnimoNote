@@ -15,7 +15,7 @@
  * 5. 读取/保存 config.json 和 mapping.json
  */
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -87,10 +87,28 @@ function createCharacterWindow(instanceId, modelDir, midiChannel) {
         return win;
     }
 
+    // 尝试从 config.json 加载保存的位置
+    let savedX = undefined;
+    let savedY = undefined;
+    try {
+        const configPath = path.join(modelDir, 'config.json');
+        if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            if (config.window && config.window.x !== undefined && config.window.y !== undefined) {
+                savedX = config.window.x;
+                savedY = config.window.y;
+            }
+        }
+    } catch (e) {
+        console.error('[Main] Failed to load window position:', e.message);
+    }
+
     try {
         const win = new BrowserWindow({
             width: 600,
             height: 800,
+            x: savedX,
+            y: savedY,
             transparent: true,
             frame: false,
             alwaysOnTop: true,
@@ -177,6 +195,41 @@ ipcMain.on('set-draggable', (event, draggable) => {
     }
 });
 
+ipcMain.on('window-move', (event, { deltaX, deltaY }) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+        const [x, y] = win.getPosition();
+        win.setPosition(Math.round(x + deltaX), Math.round(y + deltaY));
+    }
+});
+
+ipcMain.on('save-window-position', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+        const [x, y] = win.getPosition();
+        // 尝试从 webContents 的 URL 获取 modelDir
+        const url = new URL(win.webContents.getURL());
+        const modelDir = url.searchParams.get('modelDir');
+        if (modelDir) {
+            try {
+                const decodedDir = decodeURIComponent(modelDir);
+                const configPath = path.join(decodedDir, 'config.json');
+                let config = {};
+                if (fs.existsSync(configPath)) {
+                    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+                }
+                if (!config.window) config.window = {};
+                config.window.x = x;
+                config.window.y = y;
+                fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
+                console.log(`[Main] Saved window position for ${decodedDir}: ${x}, ${y}`);
+            } catch (e) {
+                console.error('[Main] Failed to save window position:', e.message);
+            }
+        }
+    }
+});
+
 // ============================================================
 // IPC: 角色窗口状态上报
 // ============================================================
@@ -185,6 +238,17 @@ ipcMain.on('character-status', (event, status) => {
     // 将角色窗口的状态转发到控制台渲染进程
     if (controlWindow && !controlWindow.isDestroyed()) {
         controlWindow.webContents.send('character-status', status);
+    }
+});
+
+// ============================================================
+// IPC: 转发配置更新到角色窗口
+// ============================================================
+
+ipcMain.on('update-character-config', (event, { instanceId, config }) => {
+    const win = characterWindows.get(instanceId);
+    if (win && !win.isDestroyed()) {
+        win.webContents.send('update-config', config);
     }
 });
 
@@ -310,6 +374,24 @@ ipcMain.handle('scan-pmx-files', async (event, { modelDir }) => {
     return pmxFiles;
 });
 
+ipcMain.handle('delete-model', async (event, { modelId, modelDir }) => {
+    try {
+        if (fs.existsSync(modelDir)) {
+            // 安全起见，检查是否在 models 目录下
+            const modelsDir = path.resolve(__dirname, '..', 'models');
+            if (!path.resolve(modelDir).startsWith(modelsDir)) {
+                throw new Error('非法删除路径');
+            }
+            // 移至系统回收站
+            await shell.trashItem(modelDir);
+            return { success: true };
+        }
+        return { success: false, error: '目录不存在' };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
 ipcMain.handle('create-model', async (event, { modelId, displayName }) => {
     const modelsDir = path.join(__dirname, '..', 'models');
     const modelDir = path.join(modelsDir, modelId);
@@ -386,7 +468,6 @@ ipcMain.handle('get-characters', async () => {
     for (const [instanceId, win] of characterWindows) {
         result.push({
             instanceId,
-            pid: process.pid, // 同一进程
             status: !win.isDestroyed() ? 'running' : 'stopped',
         });
     }

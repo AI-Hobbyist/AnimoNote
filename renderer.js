@@ -201,23 +201,79 @@ async function main() {
         }
     }
 
+    // ★ 实时调整参数状态
+    const liveParams = {
+        brightness: 1.0,
+        scale: 1.0,
+        opacity: 1.0
+    };
+
+    // 从配置初始化参数
+    if (config?.model) {
+        liveParams.brightness = config.model.light_intensity ?? 1.0;
+        liveParams.scale = config.model.scale ?? 1.0;
+        liveParams.opacity = config.model.opacity ?? 1.0;
+        
+        // 应用初始亮度
+        brightnessState.multiplier = liveParams.brightness;
+        updateBrightness();
+    }
+
+    // ★ 应用透明度到模型
+    function applyOpacity(value) {
+        if (!model) return;
+        model.traverse((child) => {
+            if (child.isMesh) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach(m => {
+                    m.opacity = value;
+                    m.transparent = value < 1.0 || (m.userData.originalTransparent === true);
+                    m.needsUpdate = true;
+                });
+            }
+        });
+    }
+
+    // ★ 监听来自控制台的实时配置更新
+    if (api) {
+        api.onUpdateConfig((newConfig) => {
+            console.log('[AnimoNote] Config update received:', newConfig);
+            if (newConfig.brightness !== undefined) {
+                liveParams.brightness = newConfig.brightness;
+                brightnessState.multiplier = newConfig.brightness;
+                updateBrightness();
+                showBrightnessHint();
+            }
+            if (newConfig.scale !== undefined) {
+                liveParams.scale = newConfig.scale;
+                if (model) model.scale.set(newConfig.scale, newConfig.scale, newConfig.scale);
+            }
+            if (newConfig.opacity !== undefined) {
+                liveParams.opacity = newConfig.opacity;
+                applyOpacity(newConfig.opacity);
+            }
+        });
+    }
+
     // ★ 键盘快捷键：[/] 降低/增加亮度，Ctrl+0 重置
     document.addEventListener('keydown', (e) => {
         if (e.key === ']' && !e.repeat) {
             brightnessState.multiplier = Math.min(brightnessState.multiplier + 0.2, 3.0);
             updateBrightness();
             showBrightnessHint();
+            liveParams.brightness = brightnessState.multiplier;
         } else if (e.key === '[' && !e.repeat) {
             brightnessState.multiplier = Math.max(brightnessState.multiplier - 0.2, 0.2);
             updateBrightness();
             showBrightnessHint();
+            liveParams.brightness = brightnessState.multiplier;
         } else if (e.key === '0' && !e.repeat && (e.ctrlKey || e.metaKey)) {
             brightnessState.multiplier = 1.0;
             updateBrightness();
             showBrightnessHint();
+            liveParams.brightness = brightnessState.multiplier;
         }
     });
-
 
     // ============================================================
     // MMD 模型加载
@@ -238,65 +294,63 @@ async function main() {
                 config.model.pmx_path.lastIndexOf('\\')
             );
             const modelDir = lastSlash >= 0 ? config.model.pmx_path.substring(0, lastSlash + 1) : '';
-            loader.setResourcePath(modelDir);
+            // ★ 修复 resourcePath：确保在 Windows 下也使用 file:// 协议，避免加载失败
+            let resourcePath = modelDir;
+            if (resourcePath && !resourcePath.startsWith('http') && !resourcePath.startsWith('file')) {
+                // 将反斜杠转为正斜杠，并加上 file:///
+                resourcePath = 'file:///' + resourcePath.replace(/\\/g, '/');
+            }
+            loader.setResourcePath(resourcePath);
             // ★ 清除 crossOrigin，避免 file:// 协议下的 CORS 问题
             loader.setCrossOrigin(undefined);
+
+            console.log(`[MMD] Loading model from: ${config.model.pmx_path}`);
+            console.log(`[MMD] Resource path: ${resourcePath}`);
 
             model = await new Promise((resolve, reject) => {
                 loader.load(config.model.pmx_path, (m) => resolve(m), null, (err) => reject(err));
             });
 
-            // ★ 将所有 MMDToonMaterial 替换为 MeshPhongMaterial
+            // ★ 优化材质处理：不再盲目替换为 MeshPhongMaterial
+            // MMDToonMaterial 包含了 MMD 特有的 Sphere Map 和 Toon Texture，这是角色质感的关键
             model.traverse((child) => {
                 if (child.isMesh) {
                     child.frustumCulled = false;
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+
                     const materials = Array.isArray(child.material) ? child.material : [child.material];
-                    const newMaterials = [];
-                    for (let mi = 0; mi < materials.length; mi++) {
-                        const oldMat = materials[mi];
-                        if (!oldMat) continue;
-                        const u = oldMat.uniforms || {};
-                        const diffuseVal = u.diffuse ? u.diffuse.value : null;
-                        const diffuseHex = (diffuseVal && diffuseVal.r !== undefined)
-                            ? ((diffuseVal.r * 255) << 16) | ((diffuseVal.g * 255) << 8) | (diffuseVal.b * 255)
-                            : 0xcccccc;
-                        const specVal = u.specular ? u.specular.value : null;
-                        const specHex = (specVal && specVal.r !== undefined)
-                            ? ((specVal.r * 255) << 16) | ((specVal.g * 255) << 8) | (specVal.b * 255)
-                            : 0x111111;
-                        const emissiveVal = u.emissive ? u.emissive.value : null;
-                        const emissiveHex = (emissiveVal && emissiveVal.r !== undefined)
-                            ? ((emissiveVal.r * 255) << 16) | ((emissiveVal.g * 255) << 8) | (emissiveVal.b * 255)
-                            : 0x000000;
-                        const shininess = u.shininess ? u.shininess.value : 30;
-                        const opacity = oldMat.opacity === 0 ? 1 : (oldMat.opacity || 1);
-                        const params = {
-                            color: diffuseHex,
-                            specular: specHex,
-                            emissive: emissiveHex,
-                            shininess: shininess,
-                            opacity: opacity,
-                            transparent: oldMat.transparent && opacity !== 1,
-                            side: THREE.FrontSide,
-                        };
-                        if (u.map && u.map.value) {
-                            params.map = u.map.value;
+                    materials.forEach((m) => {
+                        if (!m) return;
+                        
+                        // 记录原始透明状态供后续调节使用
+                        m.userData.originalTransparent = m.transparent;
+                        
+                        // ★ 关键修复：MMD 头发和附件通常需要双面渲染才能正常显示
+                        m.side = THREE.DoubleSide;
+
+                        // 修复可能存在的贴图亮度问题
+                        if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
+
+                        // 如果初始配置有透明度要求
+                        if (liveParams.opacity < 1.0) {
+                            m.transparent = true;
+                            m.opacity = liveParams.opacity;
                         }
-                        const newMat = new THREE.MeshPhongMaterial(params);
-                        newMaterials.push(newMat);
-                    }
-                    child.material = newMaterials.length === 1 ? newMaterials[0] : newMaterials;
+                    });
                 }
             });
 
-            const scale = config.model?.scale || 1.0;
-            model.scale.set(scale, scale, scale);
+            // ★ 应用实时参数（可能在加载过程中已通过 IPC 更新）
+            model.scale.set(liveParams.scale, liveParams.scale, liveParams.scale);
+            applyOpacity(liveParams.opacity);
+
             const pos = config.model?.position || {};
             model.position.set(pos.x || 0, pos.y || 0, pos.z || 0);
             const rot = config.model?.rotation || {};
             model.rotation.set(rot.x || 0, rot.y || 0, rot.z || 0);
             scene.add(model);
-            console.log(`[MMD] Model loaded: ${config.model.pmx_path}`);
+            console.log(`[MMD] Model loaded and params applied: ${config.model.pmx_path}`);
 
             // ★ 先尝试禁用物理创建 helper，如果 ammo.js 不可用则回退到无物理模式
             try {
@@ -374,21 +428,56 @@ async function main() {
     // 鼠标穿透与拖拽
     // ============================================================
 
-    renderer.domElement.style.pointerEvents = 'none';
+    // ============================================================
+    // 移动控制逻辑 (由控制中心触发全屏移动模式)
+    // ============================================================
+
+    const moveOverlay = document.getElementById('move-overlay');
+    const moveDone = document.getElementById('move-done');
+
+    // 监听来自控制中心的指令
+    if (api) {
+        api.onUpdateConfig((newConfig) => {
+            if (newConfig.type === 'show-move-dialog') {
+                // 进入移动模式
+                moveOverlay.classList.remove('hidden');
+                api.setDraggable(true); // 解除穿透，激活 -webkit-app-region: drag
+            }
+        });
+    }
+
+    moveDone.addEventListener('click', () => {
+        // 退出移动模式
+        moveOverlay.classList.add('hidden');
+        if (api) {
+            api.saveWindowPosition(); // 保存最终坐标
+            api.setDraggable(false);   // 恢复穿透
+        }
+    });
+
+    // 依然保留 Alt 键作为紧急移动手段
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Alt' && !e.repeat) {
-            renderer.domElement.style.pointerEvents = 'auto';
-            const hint = document.getElementById('drag-hint');
-            if (hint) { hint.classList.remove('hidden'); hint.classList.add('visible'); }
             if (api) api.setDraggable(true);
         }
     });
     document.addEventListener('keyup', (e) => {
         if (e.key === 'Alt') {
-            renderer.domElement.style.pointerEvents = 'none';
-            const hint = document.getElementById('drag-hint');
-            if (hint) { hint.classList.remove('visible'); hint.classList.add('hidden'); }
-            if (api) api.setDraggable(false);
+            if (api && moveOverlay.classList.contains('hidden')) {
+                api.setDraggable(false);
+            }
+        }
+    });
+
+    // 依然保留 Alt 键作为紧急移动手段（如果不穿透的话）
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Alt' && !e.repeat) {
+            if (api) api.setDraggable(true);
+        }
+    });
+    document.addEventListener('keyup', (e) => {
+        if (e.key === 'Alt') {
+            if (api && !isMoveActive) api.setDraggable(false);
         }
     });
 
@@ -457,8 +546,20 @@ async function main() {
         frameCount++;
         const now = performance.now();
         if (now - lastFpsUpdate >= 1000) {
-            if (debugFps) debugFps.textContent = `FPS: ${frameCount}`;
+            const currentFps = frameCount;
+            if (debugFps) debugFps.textContent = `FPS: ${currentFps}`;
             frameCount = 0; lastFpsUpdate = now;
+            
+            // 实时上报 FPS
+            if (api) {
+                api.reportStatus({
+                    instanceId: INSTANCE_ID,
+                    currentNote: lastNote || null,
+                    currentAction: lastAction || null,
+                    isFallback: lastFallback,
+                    fps: String(currentFps),
+                });
+            }
         }
     }
     animate();

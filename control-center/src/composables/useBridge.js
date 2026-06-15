@@ -183,9 +183,21 @@ export async function saveConfig() {
   const model = availableModels.value.find(m => m.id === selectedModelId.value)
   if (!model) return
 
+  // 深度克隆并移除已废弃字段
+  const configToSave = JSON.parse(JSON.stringify(currentConfig.value))
+  delete configToSave.idle
+  if (configToSave.model) {
+    delete configToSave.model.scale
+    delete configToSave.model.position
+  }
+  if (configToSave.midi) {
+    delete configToSave.midi.device_name
+    delete configToSave.midi.mode
+  }
+
   const result = await api().saveConfig({
     modelDir: model.modelDir,
-    config: currentConfig.value,
+    config: configToSave,
   })
 
   if (result.success) {
@@ -194,6 +206,28 @@ export async function saveConfig() {
     await scanModels()
   } else {
     addLog('error', `保存失败: ${result.error}`)
+  }
+}
+
+/**
+ * 删除角色
+ */
+export async function deleteModel(modelId) {
+  const model = availableModels.value.find(m => m.id === modelId)
+  if (!model) return
+
+  const result = await api().deleteModel({ modelId, modelDir: model.modelDir })
+  if (result.success) {
+    addLog('info', `🗑️ 角色 ${modelId} 已物理删除`)
+    if (selectedModelId.value === modelId) {
+      selectedModelId.value = null
+      currentConfig.value = null
+      currentMappings.value = {}
+    }
+    await scanModels()
+  } else {
+    addLog('error', `删除失败: ${result.error}`)
+    message.error(`删除失败: ${result.error}`)
   }
 }
 
@@ -212,7 +246,6 @@ export async function startCharacter(id, dir, ch) {
   if (r.success) {
     const instances = runningInstances.value
     instances.set(id, {
-      pid: 'same-process',
       midiChannel: ch,
       currentNote: null,
       currentAction: null,
@@ -272,6 +305,24 @@ export async function createModel(modelId, displayName) {
 }
 
 /**
+ * 保存指定角色的配置
+ */
+export async function saveModelConfig(modelDir, config) {
+  const result = await api().saveConfig({ modelDir, config })
+  if (result.success) {
+    addLog('info', `✅ 配置已自动保存`)
+  }
+  return result
+}
+
+/**
+ * 实时更新运行中角色的参数
+ */
+export function updateCharacterConfig(instanceId, config) {
+  api().updateCharacterConfig({ instanceId, config })
+}
+
+/**
  * 检测 MIDI 设备
  */
 export async function detectMidiDevices() {
@@ -313,6 +364,13 @@ export function initIpcListeners() {
       inst.currentAction = data.currentAction || null
       inst.isFallback = data.isFallback || false
       inst.fps = data.fps || '--'
+      
+      // 更新 FPS 历史记录
+      if (!inst.fpsHistory) inst.fpsHistory = []
+      const fpsVal = parseInt(data.fps) || 0
+      inst.fpsHistory.push(fpsVal)
+      if (inst.fpsHistory.length > 30) inst.fpsHistory.shift()
+
       runningInstances.value = new Map(instances)
     }
   })

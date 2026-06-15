@@ -23,8 +23,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 角色配置编辑
     readConfig: (params) => ipcRenderer.invoke('read-config', params),
     saveConfig: (params) => ipcRenderer.invoke('save-config', params),
+    deleteModel: (params) => ipcRenderer.invoke('delete-model', params),
     scanPmxFiles: (params) => ipcRenderer.invoke('scan-pmx-files', params),
     createModel: (params) => ipcRenderer.invoke('create-model', params),
+
+    // 实时配置下发
+    updateCharacterConfig: (params) => ipcRenderer.send('update-character-config', params),
 
     // 状态监听（角色窗口关闭通知）
     onCharacterClosed: (callback) => {

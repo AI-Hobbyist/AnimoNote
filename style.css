@@ -13,6 +13,7 @@ html, body {
     height: 100%;
     overflow: hidden;
     background: transparent !important;  /* ★ 关键：完全透明背景 */
+    pointer-events: none; /* 默认穿透 */
 }
 
 body {
@@ -30,7 +31,7 @@ body {
     width: 100%;
     height: 100%;
     background: transparent !important;
-    pointer-events: none;  /* ★ 关键：默认不拦截鼠标事件 */
+    pointer-events: inherit; /* ★ 改为继承父级，由 JS 控制 body 即可 */
 }
 
 /* Three.js Canvas 元素 */
@@ -91,4 +92,64 @@ body {
 
 .debug-info div {
     white-space: nowrap;
+}
+
+/* ============================================================
+   全屏移动遮罩
+   ============================================================ */
+
+.move-full-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1000;
+    background: rgba(79, 195, 247, 0.15);
+    border: 4px dashed #4fc3f7;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto !important;
+    cursor: move;
+    /* ★ 关键：标记整个区域为 Electron 拖拽区 */
+    -webkit-app-region: drag;
+}
+
+.move-drag-area {
+    background: rgba(0, 0, 0, 0.8);
+    padding: 20px 40px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    /* ★ 关键：按钮不能是拖拽区，否则无法点击 */
+    -webkit-app-region: no-drag;
+}
+
+.move-drag-label {
+    color: #4fc3f7;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.move-done-btn {
+    padding: 10px 30px;
+    background: #4fc3f7;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.move-done-btn:hover {
+    background: #81d4fa;
+}
+
+.hidden {
+    display: none !important;
 }

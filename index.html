@@ -28,6 +28,14 @@
         <span id="brightness-text">☀️ 亮度: 1.0x</span>
     </div>
 
+    <!-- 移动控制遮罩（用于移动模式） -->
+    <div id="move-overlay" class="move-full-overlay hidden">
+        <div class="move-drag-area">
+            <div class="move-drag-label">正在移动模型 - 拖动屏幕任意位置</div>
+            <button id="move-done" class="move-done-btn">完成并保存</button>
+        </div>
+    </div>
+
     <!--
         导入映射：将 bare specifier "three" 映射到本地 node_modules 路径。
         MMDLoader.js / MMDAnimationHelper.js 等依赖内部使用 import { ... } from 'three'，

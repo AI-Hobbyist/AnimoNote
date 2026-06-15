@@ -55,8 +55,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return path.resolve(...segments);
     },
 
+    // 窗口移动
+    windowMove: (deltaX, deltaY) => ipcRenderer.send('window-move', { deltaX, deltaY }),
+    // 保存窗口位置
+    saveWindowPosition: () => ipcRenderer.send('save-window-position'),
+
     // 获取项目根目录
     getProjectRoot: () => PROJECT_ROOT,
+
+    // 监听实时配置更新
+    onUpdateConfig: (callback) => {
+        ipcRenderer.on('update-config', (event, data) => callback(data));
+    },
 
     // 获取模型目录
     getModelDir: () => {

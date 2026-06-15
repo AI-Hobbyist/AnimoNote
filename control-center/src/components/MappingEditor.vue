@@ -3,47 +3,52 @@
     <n-empty description="👈 在左侧角色列表中点击一个角色" />
   </div>
   <div v-else>
-    <!-- 工具栏 -->
-    <n-space style="margin-bottom: 12px" align="center" :wrap="true">
-      <n-text depth="3" style="font-size: 12px">快速添加：</n-text>
-      <n-select
-        v-model:value="quickNote"
-        :options="availableNotes"
-        placeholder="选择音符..."
-        size="small"
-        style="width: 120px"
-        filterable
-      />
-      <n-select
-        v-model:value="quickVmd"
-        :options="vmdOptions"
-        placeholder="选择 VMD..."
-        size="small"
-        style="width: 200px"
-        filterable
-      />
-      <n-button size="small" type="primary" @click="handleQuickAdd">➕ 快速添加</n-button>
-      <n-button size="small" @click="handleAddRow">➕ 添加</n-button>
-      <n-button size="small" type="primary" @click="handleSave">💾 保存</n-button>
-    </n-space>
+    <n-scrollbar style="height: 100%">
+      <div style="padding-right: 12px">
+        <!-- 工具栏 -->
+        <n-space style="margin-bottom: 12px" align="center" :wrap="true">
+          <n-text depth="3" style="font-size: 12px">快速添加：</n-text>
+          <n-select
+            v-model:value="quickNote"
+            :options="availableNotes"
+            placeholder="选择音符..."
+            size="small"
+            style="width: 120px"
+            filterable
+          />
+          <n-select
+            v-model:value="quickVmd"
+            :options="vmdOptions"
+            placeholder="选择 VMD..."
+            size="small"
+            style="width: 200px"
+            filterable
+          />
+          <n-button size="small" type="primary" @click="handleQuickAdd">➕ 快速添加</n-button>
+          <n-button size="small" @click="handleAddRow">➕ 添加</n-button>
+          <n-button size="small" type="primary" @click="handleSave">💾 保存</n-button>
+        </n-space>
 
-    <!-- 映射表格 -->
-    <div v-if="mappingEntries.length === 0" class="empty-state">
-      <n-empty description="🎼 暂无映射">
-        <template #extra>
-          <n-button size="small" @click="handleAddRow">添加映射</n-button>
-        </template>
-      </n-empty>
-    </div>
-    <n-data-table
-      v-else
-      :columns="mappingColumns"
-      :data="mappingEntries"
-      :bordered="false"
-      :single-line="false"
-      size="small"
-      :row-key="row => row[0]"
-    />
+        <!-- 映射表格 -->
+        <div v-if="mappingEntries.length === 0" class="empty-state">
+          <n-empty description="🎼 暂无映射">
+            <template #extra>
+              <n-button size="small" @click="handleAddRow">添加映射</n-button>
+            </template>
+          </n-empty>
+        </div>
+        <n-data-table
+          v-else
+          :columns="mappingColumns"
+          :data="mappingEntries"
+          :bordered="false"
+          :single-line="false"
+          size="small"
+          :row-key="row => row[0]"
+          scroll-x="800"
+        />
+      </div>
+    </n-scrollbar>
   </div>
 </template>
 

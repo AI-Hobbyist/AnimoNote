@@ -12,11 +12,24 @@
           </n-text>
         </template>
         <template #extra>
-          <n-space>
-            <n-button size="small" @click="handleScan">
+          <n-space align="center">
+            <!-- MIDI 设备选择 -->
+            <n-text depth="3" style="font-size: 12px">MIDI 设备:</n-text>
+            <n-select
+              v-model:value="selectedMidiDevice"
+              :options="midiDeviceOptions"
+              size="small"
+              placeholder="选择设备..."
+              style="width: 180px"
+              clearable
+            />
+            <n-button size="small" @click="handleDetectMidi">
               <template #icon><n-icon><ReloadIcon /></n-icon></template>
-              刷新
+              刷新设备
             </n-button>
+
+            <n-divider vertical />
+
             <n-button type="primary" size="small" @click="handleStartAll">
               ▶ 全部启动
             </n-button>
@@ -96,7 +109,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { darkTheme, zhCN, dateZhCN } from 'naive-ui'
 import { Reload as ReloadIcon, Add as AddIcon } from '@vicons/ionicons5'
 import {
@@ -108,6 +121,7 @@ import {
   initIpcListeners,
   runningInstances,
   availableModels,
+  midiDeviceList,
   message,
   dialog,
 } from './composables/useBridge.js'
@@ -122,6 +136,19 @@ const activeTab = ref('instances')
 const showNewModelModal = ref(false)
 const newModelId = ref('')
 const newModelName = ref('')
+const selectedMidiDevice = ref(null)
+
+const midiDeviceOptions = computed(() => {
+  return [
+    { label: '— 所有设备 —', value: null },
+    ...midiDeviceList.value.map(d => ({ label: d.name, value: d.name }))
+  ]
+})
+
+async function handleDetectMidi() {
+  await detectMidiDevices()
+  message.success('MIDI 设备列表已更新')
+}
 
 async function handleScan() {
   await scanModels()
@@ -240,26 +267,37 @@ html, body, #app {
 }
 
 .sidebar {
-  width: 280px;
-  min-width: 280px;
+  width: 25%;
+  max-width: 320px;
+  min-width: 240px;
   display: flex;
   flex-direction: column;
   padding: 12px;
   background: #16213e;
   border-right: 1px solid var(--border-color);
   overflow-y: auto;
+  min-height: 0;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    width: 200px;
+    min-width: 200px;
+  }
 }
 
 .sidebar-card {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .sidebar-card .n-card__content {
   flex: 1;
   overflow-y: auto;
   padding: 4px;
+  min-height: 0;
 }
 
 .content {
@@ -276,18 +314,25 @@ html, body, #app {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .content-card .n-card__content {
   flex: 1;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 0;
+  min-height: 0;
 }
 
 .tab-pane {
-  height: 100%;
-  overflow-y: auto;
+  flex: 1;
+  overflow: hidden;
   padding: 12px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .log-card {
