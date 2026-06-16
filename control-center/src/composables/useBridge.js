@@ -1,94 +1,40 @@
 /**
  * Electron IPC 通信桥接
  *
- * 封装 window.electronAPI 调用，提供响应式状态管理
+ * 封装 window.electronAPI 调用，提供响应式状态管理。
  */
 import { ref, reactive, shallowRef } from 'vue'
 import { createDiscreteApi } from 'naive-ui'
 
 // ============================================================
-// 离散 API（替代 useMessage/useDialog，无需 Provider 包裹）
+// 离散 API
 // ============================================================
 
-/**
- * 使用 createDiscreteApi 创建 message、dialog、notification 实例。
- * 这样在组件中无需 n-message-provider / n-dialog-provider 包裹即可使用。
- * 参考: https://www.naiveui.com/zh-CN/os-theme/components/discrete
- */
 const { message, dialog, notification } = createDiscreteApi(
   ['message', 'dialog', 'notification'],
-  {
-    configProviderProps: {
-      theme: undefined, // 由 App.vue 的 n-config-provider 控制
-    }
-  }
+  { configProviderProps: { theme: undefined } }
 )
 
 export { message, dialog, notification }
 
 // ============================================================
-// 类型定义（JSDoc）
-// ============================================================
-
-/**
- * @typedef {Object} ModelInfo
- * @property {string} id
- * @property {string} displayName
- * @property {string} configPath
- * @property {string} mappingPath
- * @property {string} modelDir
- * @property {number} midiChannel
- * @property {string} midiDevice
- * @property {boolean} hasModel
- * @property {number} noteCount
- */
-
-/**
- * @typedef {Object} RunningInstance
- * @property {string|number} pid
- * @property {number} midiChannel
- * @property {string|null} currentNote
- * @property {string|null} currentAction
- * @property {boolean} isFallback
- * @property {string} [fps]
- */
-
-// ============================================================
 // 全局状态
 // ============================================================
 
-/** @type {import('vue').Ref<ModelInfo[]>} */
 export const availableModels = ref([])
-
-/** @type {import('vue').Ref<Map<string, RunningInstance>>} */
-export const runningInstances = ref(new Map())
-
-/** @type {import('vue').Ref<string|null>} */
+export const summonedCharacters = ref(new Map()) // instanceId -> { midiChannel, fps, currentNote, currentAction, isFallback }
 export const selectedModelId = ref(null)
-
-/** @type {import('vue').Ref<Object>} */
 export const currentMappings = ref({})
-
-/** @type {import('vue').Ref<Array>} */
 export const currentVmdFiles = ref([])
-
-/** @type {import('vue').Ref<boolean>} */
 export const hasUnsavedMapping = ref(false)
-
-/** @type {import('vue').Ref<Object|null>} */
 export const currentConfig = ref(null)
-
-/** @type {import('vue').Ref<Array>} */
 export const currentPmxFiles = ref([])
-
-/** @type {import('vue').Ref<boolean>} */
 export const hasUnsavedConfig = ref(false)
-
-/** @type {import('vue').Ref<Array>} */
 export const logEntries = ref([])
-
-/** @type {import('vue').Ref<Array>} */
 export const midiDeviceList = ref([])
+export const screenList = ref([])
+export const selectedDisplayId = ref(null)
+export const rehearsalMode = ref(false)
 
 // ============================================================
 // API 代理
@@ -128,7 +74,6 @@ export async function selectModel(modelId) {
   const model = availableModels.value.find(m => m.id === modelId)
   if (!model) return
 
-  // 加载映射
   try {
     const md = await api().readMapping({ modelDir: model.modelDir })
     currentMappings.value = md.note_mappings || {}
@@ -139,7 +84,6 @@ export async function selectModel(modelId) {
   }
   hasUnsavedMapping.value = false
 
-  // 加载配置
   try {
     currentConfig.value = await api().readConfig({ modelDir: model.modelDir })
     currentPmxFiles.value = await api().scanPmxFiles({ modelDir: model.modelDir })
@@ -158,7 +102,6 @@ export async function saveMapping() {
   const model = availableModels.value.find(m => m.id === selectedModelId.value)
   if (!model) return
 
-  // 清理空映射
   const clean = {}
   for (const [n, m] of Object.entries(currentMappings.value)) {
     if (m.vmd_path) clean[n] = m
@@ -169,9 +112,9 @@ export async function saveMapping() {
   if (r.success) {
     hasUnsavedMapping.value = false
     model.noteCount = Object.keys(clean).length
-    addLog('info', `✅ 映射已保存 (${model.noteCount} 个)`)
+    addLog('info', `✅ 映射已保存 (${Object.keys(clean).length} 个)`)
   } else {
-    addLog('error', `保存失败: ${r.error}`)
+    addLog('error', `保存失败: ${r.error || ''}`)
   }
 }
 
@@ -183,7 +126,6 @@ export async function saveConfig() {
   const model = availableModels.value.find(m => m.id === selectedModelId.value)
   if (!model) return
 
-  // 深度克隆并移除已废弃字段
   const configToSave = JSON.parse(JSON.stringify(currentConfig.value))
   delete configToSave.idle
   if (configToSave.model) {
@@ -195,17 +137,13 @@ export async function saveConfig() {
     delete configToSave.midi.mode
   }
 
-  const result = await api().saveConfig({
-    modelDir: model.modelDir,
-    config: configToSave,
-  })
-
+  const result = await api().saveConfig({ modelDir: model.modelDir, config: configToSave })
   if (result.success) {
     hasUnsavedConfig.value = false
-    addLog('info', `✅ 配置已保存到 ${model.id}/config.json`)
+    addLog('info', '✅ 配置已保存到 /config.json')
     await scanModels()
   } else {
-    addLog('error', `保存失败: ${result.error}`)
+    addLog('error', `保存失败: ${result.error || ''}`)
   }
 }
 
@@ -226,71 +164,77 @@ export async function deleteModel(modelId) {
     }
     await scanModels()
   } else {
-    addLog('error', `删除失败: ${result.error}`)
-    message.error(`删除失败: ${result.error}`)
+    addLog('error', `删除失败: ${result.error || ''}`)
+    message.error(`删除失败: ${result.error || ''}`)
   }
 }
 
 /**
- * 启动角色窗口
+ * 召唤角色（替代 startCharacter）
  */
-export async function startCharacter(id, dir, ch) {
+export async function summonCharacter(id, dir, ch) {
   let decodedDir = dir
   try {
     const testDecoded = decodeURIComponent(dir)
     if (testDecoded !== dir) decodedDir = testDecoded
   } catch (e) { /* ignore */ }
 
-  addLog('info', `打开角色窗口: ${id} (CH ${String(ch).padStart(2, '0')})`)
-  const r = await api().startCharacter({ instanceId: id, modelDir: decodedDir, midiChannel: ch })
+  addLog('info', `召唤角色: ${id} (CH ${ch})`)
+  const r = await api().summonCharacter({
+    instanceId: id,
+    modelDir: decodedDir,
+    midiChannel: ch,
+    displayId: selectedDisplayId.value
+  })
   if (r.success) {
-    const instances = runningInstances.value
+    const instances = summonedCharacters.value
     instances.set(id, {
       midiChannel: ch,
       currentNote: null,
       currentAction: null,
       isFallback: false,
+      fps: '--',
     })
-    runningInstances.value = new Map(instances)
-    addLog('info', `${id} 窗口已打开`)
+    summonedCharacters.value = new Map(instances)
+    addLog('info', `${id} 已召唤至场景`)
   } else {
-    addLog('error', `打开失败: ${r.error}`)
+    addLog('error', `召唤失败: ${r.error || ''}`)
   }
 }
 
 /**
- * 停止角色窗口
+ * 召回角色（替代 stopCharacter）
  */
-export async function stopCharacter(id) {
-  addLog('info', `关闭角色窗口: ${id}`)
-  await api().stopCharacter({ instanceId: id })
-  const instances = runningInstances.value
+export async function recallCharacter(id) {
+  addLog('info', `召回角色: ${id}`)
+  await api().recallCharacter({ instanceId: id })
+  const instances = summonedCharacters.value
   instances.delete(id)
-  runningInstances.value = new Map(instances)
+  summonedCharacters.value = new Map(instances)
 }
 
 /**
- * 启动全部
+ * 召唤全部
  */
 export async function startAll() {
   for (const m of availableModels.value) {
-    if (!runningInstances.value.has(m.id)) {
-      await startCharacter(m.id, m.modelDir, m.midiChannel)
+    if (!summonedCharacters.value.has(m.id)) {
+      await summonCharacter(m.id, m.modelDir, m.midiChannel)
     }
   }
 }
 
 /**
- * 停止全部
+ * 召回全部
  */
 export async function stopAll() {
-  for (const [id] of runningInstances.value) {
-    await stopCharacter(id)
+  for (const [id] of summonedCharacters.value) {
+    await recallCharacter(id)
   }
 }
 
 /**
- * 创建新模型
+ * 创建新角色
  */
 export async function createModel(modelId, displayName) {
   const result = await api().createModel({ modelId, displayName: displayName || modelId })
@@ -299,7 +243,7 @@ export async function createModel(modelId, displayName) {
     await scanModels()
     await selectModel(modelId)
   } else {
-    addLog('error', `创建失败: ${result.error}`)
+    addLog('error', `创建失败: ${result.error || ''}`)
   }
   return result
 }
@@ -310,7 +254,7 @@ export async function createModel(modelId, displayName) {
 export async function saveModelConfig(modelDir, config) {
   const result = await api().saveConfig({ modelDir, config })
   if (result.success) {
-    addLog('info', `✅ 配置已自动保存`)
+    addLog('info', '✅ 配置已自动保存')
   }
   return result
 }
@@ -320,6 +264,51 @@ export async function saveModelConfig(modelDir, config) {
  */
 export function updateCharacterConfig(instanceId, config) {
   api().updateCharacterConfig({ instanceId, config })
+}
+
+// ============================================================
+// 排练模式
+// ============================================================
+
+/**
+ * 进入排练模式
+ */
+export async function enterRehearsal() {
+  if (summonedCharacters.value.size === 0) {
+    message.warning('请先召唤至少一个角色')
+    return
+  }
+  const r = await api().enterRehearsal()
+  if (r.success) {
+    rehearsalMode.value = true
+    addLog('info', '🎭 进入排练模式')
+  } else {
+    addLog('error', `进入排练模式失败: ${r.error || ''}`)
+  }
+}
+
+/**
+ * 退出排练模式
+ */
+export async function exitRehearsal() {
+  const r = await api().exitRehearsal()
+  if (r.success) {
+    rehearsalMode.value = false
+    addLog('info', '🎭 退出排练模式，位置已保存')
+  } else {
+    addLog('error', `退出排练模式失败: ${r.error || ''}`)
+  }
+}
+
+/**
+ * 切换排练模式
+ */
+export async function toggleRehearsal() {
+  if (rehearsalMode.value) {
+    await exitRehearsal()
+  } else {
+    await enterRehearsal()
+  }
 }
 
 /**
@@ -337,6 +326,13 @@ export async function detectMidiDevices() {
       })
     }
     midiDeviceList.value = devices
+
+    // 恢复保存的 MIDI 设备
+    const settings = await api().readSettings()
+    if (settings.midi && settings.midi.deviceName) {
+      // 这里的逻辑可以由组件自己处理，或者在这里设置全局状态
+    }
+
     return devices
   } catch (e) {
     return []
@@ -344,34 +340,68 @@ export async function detectMidiDevices() {
 }
 
 /**
+ * 获取屏幕列表
+ */
+export async function detectScreens() {
+  try {
+    const screens = await api().getScreens()
+    screenList.value = screens
+    
+    // 加载保存的显示器设置
+    const settings = await api().readSettings()
+    if (settings.displayId && screens.find(s => s.id === settings.displayId)) {
+      selectedDisplayId.value = settings.displayId
+    } else if (selectedDisplayId.value === null && screens.length > 0) {
+      const primary = screens.find(s => s.isPrimary)
+      selectedDisplayId.value = primary ? primary.id : screens[0].id
+    }
+    return screens
+  } catch (e) {
+    return []
+  }
+}
+
+/**
+ * 保存全局设置
+ */
+export async function saveGlobalSettings(settings) {
+  try {
+    await api().saveSettings(settings)
+  } catch (e) {
+    console.error('Failed to save settings:', e)
+  }
+}
+
+/**
  * 初始化 IPC 监听
  */
 export function initIpcListeners() {
-  // 角色窗口关闭通知
-  api().onCharacterClosed((data) => {
-    const instances = runningInstances.value
-    instances.delete(data.instanceId)
-    runningInstances.value = new Map(instances)
-    addLog('info', `角色窗口已关闭: ${data.instanceId}`)
-  })
-
-  // 角色窗口状态更新
+  // 角色状态更新（来自场景窗口）
   api().onCharacterStatus((data) => {
-    const instances = runningInstances.value
+    // 处理排练状态回传
+    if (data.instanceId === '__rehearsal__' && data.rehearsalActive === false) {
+      rehearsalMode.value = false
+      return
+    }
+
+    const instances = summonedCharacters.value
     const inst = instances.get(data.instanceId)
     if (inst) {
       inst.currentNote = data.currentNote || null
       inst.currentAction = data.currentAction || null
       inst.isFallback = data.isFallback || false
       inst.fps = data.fps || '--'
-      
-      // 更新 FPS 历史记录
-      if (!inst.fpsHistory) inst.fpsHistory = []
-      const fpsVal = parseInt(data.fps) || 0
-      inst.fpsHistory.push(fpsVal)
-      if (inst.fpsHistory.length > 30) inst.fpsHistory.shift()
+      summonedCharacters.value = new Map(instances)
+    }
+  })
 
-      runningInstances.value = new Map(instances)
+  // 场景窗口关闭通知
+  api().onCharacterClosed((data) => {
+    if (data.instanceId === '__scene__') {
+      // 整个场景窗口关闭，清除所有角色
+      summonedCharacters.value = new Map()
+      rehearsalMode.value = false
+      addLog('info', '场景窗口已关闭')
     }
   })
 }

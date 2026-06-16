@@ -23,11 +23,11 @@
           <div class="model-id">{{ model.id }} · CH {{ String(model.midiChannel).padStart(2, '0') }}</div>
         </div>
         <n-tag size="tiny" :bordered="false" type="info">{{ model.noteCount }}</n-tag>
-        <n-badge v-if="runningInstances.has(model.id)" dot type="success" />
+        <n-badge v-if="summonedCharacters.has(model.id)" dot type="success" />
       </n-flex>
 
       <!-- LCD 状态屏 -->
-      <div v-if="runningInstances.has(model.id)" class="model-lcd" :class="{ 'lcd-fallback': insts.get(model.id)?.isFallback }">
+      <div v-if="summonedCharacters.has(model.id)" class="model-lcd" :class="{ 'lcd-fallback': insts.get(model.id)?.isFallback }">
         <div class="lcd-row">
           <span class="lcd-label">CH</span>
           <span class="lcd-value lcd-active">
@@ -65,14 +65,14 @@ import { computed } from 'vue'
 import {
   availableModels,
   selectedModelId,
-  runningInstances,
+  summonedCharacters,
   selectModel,
 } from '../composables/useBridge.js'
 
 const emit = defineEmits(['scan'])
 
 // 为每个模型计算其实例状态
-const insts = computed(() => runningInstances.value)
+const insts = computed(() => summonedCharacters.value)
 
 function handleSelect(id) {
   selectModel(id)

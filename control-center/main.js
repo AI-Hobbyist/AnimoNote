@@ -1,25 +1,8 @@
-/**
- * AnimoNote - 中央控制台主进程（单进程多窗口架构）
- * 
- * 架构说明：
- * - 这是一个单 Electron 进程应用
- * - 控制台窗口 + N 个角色窗口，都在同一个进程中
- * - 角色窗口通过 IPC 直接与控制台通信（无需子进程 stdin/stdout）
- * - 每个角色窗口是一个独立的 BrowserWindow，透明、无边框、鼠标穿透
- * 
- * 职责：
- * 1. 管理控制台 UI 窗口
- * 2. 管理所有角色窗口（创建/销毁/配置）
- * 3. 扫描 models/ 目录发现可用角色
- * 4. 提供 MIDI 输入设备选择与通道分配
- * 5. 读取/保存 config.json 和 mapping.json
- */
-
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-// ⚡ GPU 加速
+// GPU 加速
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('use-angle', 'd3d11');
@@ -29,10 +12,11 @@ app.commandLine.appendSwitch('use-angle', 'd3d11');
 // ============================================================
 
 let controlWindow = null;
-const characterWindows = new Map(); // instanceId → BrowserWindow
+let sceneWindow = null;
+const summonedCharacters = new Map(); // instanceId -> { modelDir, midiChannel, config }
 
 // ============================================================
-// 控制台窗口
+// 控制中心窗口
 // ============================================================
 
 function createControlWindow() {
@@ -42,9 +26,10 @@ function createControlWindow() {
         title: 'AnimoNote Control Center',
         show: false,
         webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
+            preload: path.join(__dirname, '..', 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            sandbox: false,
             webSecurity: false,
         },
     });
@@ -52,8 +37,6 @@ function createControlWindow() {
     controlWindow.maximize();
     controlWindow.once('ready-to-show', () => controlWindow.show());
 
-    // 开发模式：使用 Vite 开发服务器
-    // 生产模式：使用 Vite 构建后的文件
     const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
     if (isDev) {
         controlWindow.loadURL('http://localhost:5173');
@@ -64,191 +47,245 @@ function createControlWindow() {
 
     controlWindow.on('closed', () => {
         controlWindow = null;
-        // 关闭所有角色窗口
-        for (const [id, win] of characterWindows) {
-            win.close();
+        if (sceneWindow) {
+            sceneWindow.close();
+            sceneWindow = null;
         }
-        characterWindows.clear();
+        summonedCharacters.clear();
     });
 }
 
 // ============================================================
-// 角色窗口管理
+// 场景窗口（单窗口管理所有角色）
 // ============================================================
 
-/**
- * 创建或显示一个角色窗口
- */
-function createCharacterWindow(instanceId, modelDir, midiChannel) {
-    // 如果窗口已存在，聚焦它
-    if (characterWindows.has(instanceId)) {
-        const win = characterWindows.get(instanceId);
-        win.focus();
-        return win;
+function createSceneWindow(displayId) {
+    if (sceneWindow && !sceneWindow.isDestroyed()) {
+        sceneWindow.focus();
+        return sceneWindow;
     }
 
-    // 尝试从 config.json 加载保存的位置
-    let savedX = undefined;
-    let savedY = undefined;
-    try {
-        const configPath = path.join(modelDir, 'config.json');
-        if (fs.existsSync(configPath)) {
-            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-            if (config.window && config.window.x !== undefined && config.window.y !== undefined) {
-                savedX = config.window.x;
-                savedY = config.window.y;
-            }
+    const displays = screen.getAllDisplays();
+    const targetDisplay = displays.find(d => d.id === displayId) || screen.getPrimaryDisplay();
+    const { x, y, width, height } = targetDisplay.bounds;
+
+    sceneWindow = new BrowserWindow({
+        x: x,
+        y: y,
+        width: width,
+        height: height,
+        transparent: true,
+        frame: false,
+        alwaysOnTop: true,
+        hasShadow: false,
+        type: 'toolbar',
+        focusable: false,
+        skipTaskbar: true,
+        webPreferences: {
+            preload: path.join(__dirname, '..', 'preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: false,
+            webSecurity: false,
+            allowRunningInsecureContent: true,
+        },
+    });
+
+    sceneWindow.loadFile(path.join(__dirname, '..', 'index.html'));
+
+    // 默认鼠标穿透
+    sceneWindow.setIgnoreMouseEvents(true, { forward: true });
+
+    sceneWindow.on('closed', () => {
+        console.log('[Scene] Window closed');
+        sceneWindow = null;
+        summonedCharacters.clear();
+        if (controlWindow && !controlWindow.isDestroyed()) {
+            controlWindow.webContents.send('character-closed', { instanceId: '__scene__' });
         }
-    } catch (e) {
-        console.error('[Main] Failed to load window position:', e.message);
-    }
+    });
 
+    sceneWindow.webContents.on('console-message', (event, level, message) => {
+         console.log(`[Scene] Console message: ${message}`);
+    });
+
+    console.log('[Scene] Window created');
+    return sceneWindow;
+}
+
+// ============================================================
+// IPC: 角色管理（召唤/召回）
+// ============================================================
+
+ipcMain.handle('summon-character', async (event, { instanceId, modelDir, midiChannel, displayId }) => {
     try {
-        const win = new BrowserWindow({
-            width: 600,
-            height: 800,
-            x: savedX,
-            y: savedY,
-            transparent: true,
-            frame: false,
-            alwaysOnTop: true,
-            hasShadow: false,
-            type: 'toolbar',
-            focusable: false,
-            skipTaskbar: true,
-            webPreferences: {
-                preload: path.join(__dirname, '..', 'preload.js'),
-                contextIsolation: true,
-                nodeIntegration: false,
-                sandbox: false,          // ★ 必须禁用 sandbox 才能使用 Node 模块
-                webSecurity: false,      // ★ 允许 file:// 协议加载本地模块
-                allowRunningInsecureContent: true,
-            },
-        });
-
-        // 加载角色页面
-        // ★ 注意：Electron 的 loadFile query 参数会自动进行 URL 编码
-        //   所以这里传入原始路径即可，不要手动 encodeURIComponent
-        //   否则会导致双重编码（如 %3A → %253A）
-        //   子窗口 renderer.js 会做 decodeURIComponent 还原
-        win.loadFile(path.join(__dirname, '..', 'index.html'), {
-            query: {
-                instanceId,
-                modelDir,
-                midiChannel: String(midiChannel),
+        const win = createSceneWindow(displayId);
+        
+        // 加载角色配置
+        let config = null;
+        try {
+            const configPath = path.join(modelDir, 'config.json');
+            if (fs.existsSync(configPath)) {
+                config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
             }
-        });
-
-        // 默认鼠标穿透
-        win.setIgnoreMouseEvents(true, { forward: true });
-
-        // 窗口关闭时清理
-        win.on('closed', () => {
-            console.log(`[Character] Window closed: ${instanceId}`);
-            characterWindows.delete(instanceId);
-            if (controlWindow && !controlWindow.isDestroyed()) {
-                controlWindow.webContents.send('character-closed', { instanceId });
+            const mappingPath = path.join(modelDir, 'mapping.json');
+            if (fs.existsSync(mappingPath)) {
+                config = config || {};
+                config.note_mappings = JSON.parse(fs.readFileSync(mappingPath, 'utf-8')).note_mappings || {};
             }
-        });
+        } catch (e) {
+            console.error('[Summon] Config load error:', e.message);
+        }
 
-        // 监听渲染进程错误
-        win.webContents.on('console-message', (event, level, message) => {
-            console.log(`[Character:${instanceId}] ${message}`);
-        });
+        summonedCharacters.set(instanceId, { modelDir, midiChannel, config });
 
-        win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-            console.error(`[Character:${instanceId}] Failed to load: ${errorDescription} (${errorCode})`);
-        });
+        // 等待窗口加载完成后发送
+        const sendSummon = () => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('scene-summon', { instanceId, modelDir, midiChannel, config });
+            }
+        };
 
-        characterWindows.set(instanceId, win);
-        console.log(`[Character] Window created: ${instanceId}`);
-        return win;
-    } catch (err) {
-        console.error(`[Character] Failed to create window ${instanceId}:`, err);
-        throw err;
-    }
-}
-
-/**
- * 关闭角色窗口
- */
-function closeCharacterWindow(instanceId) {
-    const win = characterWindows.get(instanceId);
-    if (win) {
-        win.close();
-        characterWindows.delete(instanceId);
-    }
-}
-
-// ============================================================
-// IPC: 角色窗口鼠标穿透控制
-// ============================================================
-
-ipcMain.on('set-draggable', (event, draggable) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) {
-        if (draggable) {
-            win.setIgnoreMouseEvents(false);
+        if (win.webContents.isLoading()) {
+            win.webContents.once('did-finish-load', sendSummon);
         } else {
-            win.setIgnoreMouseEvents(true, { forward: true });
+            sendSummon();
         }
+
+         console.log(`[Summon] Character summoned: ${modelDir} / ${instanceId}`);
+        return { success: true };
+    } catch (err) {
+         console.error(`[Summon] Failed: ${err.message}`);
+        return { success: false, error: err.message };
     }
 });
 
-ipcMain.on('window-move', (event, { deltaX, deltaY }) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) {
-        const [x, y] = win.getPosition();
-        win.setPosition(Math.round(x + deltaX), Math.round(y + deltaY));
+ipcMain.handle('recall-character', async (event, { instanceId }) => {
+    try {
+        if (sceneWindow && !sceneWindow.isDestroyed()) {
+            sceneWindow.webContents.send('scene-recall', { instanceId });
+        }
+        summonedCharacters.delete(instanceId);
+         console.log(`[Recall] Character recalled: ${instanceId}`);
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
     }
 });
 
-ipcMain.on('save-window-position', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) {
-        const [x, y] = win.getPosition();
-        // 尝试从 webContents 的 URL 获取 modelDir
-        const url = new URL(win.webContents.getURL());
-        const modelDir = url.searchParams.get('modelDir');
-        if (modelDir) {
-            try {
-                const decodedDir = decodeURIComponent(modelDir);
-                const configPath = path.join(decodedDir, 'config.json');
-                let config = {};
-                if (fs.existsSync(configPath)) {
-                    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-                }
-                if (!config.window) config.window = {};
-                config.window.x = x;
-                config.window.y = y;
-                fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
-                console.log(`[Main] Saved window position for ${decodedDir}: ${x}, ${y}`);
-            } catch (e) {
-                console.error('[Main] Failed to save window position:', e.message);
-            }
+ipcMain.handle('get-summoned-characters', async () => {
+    const result = [];
+    for (const [instanceId, info] of summonedCharacters) {
+        result.push({
+            instanceId,
+            status: sceneWindow && !sceneWindow.isDestroyed() ? 'summoned' : 'stopped',
+            midiChannel: info.midiChannel,
+        });
+    }
+    return result;
+});
+
+// ============================================================
+// IPC: 排练模式
+// ============================================================
+
+ipcMain.handle('enter-rehearsal', async () => {
+    try {
+        if (sceneWindow && !sceneWindow.isDestroyed()) {
+            sceneWindow.webContents.send('scene-rehearsal', { active: true });
+            return { success: true };
         }
+        return { success: false, error: '场景窗口未创建' };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('exit-rehearsal', async () => {
+    try {
+        if (sceneWindow && !sceneWindow.isDestroyed()) {
+            sceneWindow.webContents.send('scene-rehearsal', { active: false });
+            return { success: true };
+        }
+        return { success: false, error: '场景窗口未创建' };
+    } catch (err) {
+        return { success: false, error: err.message };
     }
 });
 
 // ============================================================
-// IPC: 角色窗口状态上报
+// IPC: 窗口控制（场景窗口使用）
+// ============================================================
+
+ipcMain.on('scene-ready', (event) => {
+    console.log('[Scene] Ready signal received');
+    // 重新发送所有已召唤的角色
+    for (const [instanceId, info] of summonedCharacters) {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('scene-summon', { instanceId, ...info });
+        }
+    }
+});
+
+ipcMain.on('set-ignore-mouse-events', (event, ignore) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+        win.setIgnoreMouseEvents(ignore, ignore ? { forward: true } : false);
+         console.log(`[Scene] Mouse ignore: ${ignore}`);
+    }
+});
+
+ipcMain.on('set-window-opacity', (event, opacity) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+        win.setOpacity(opacity);
+         console.log(`[Scene] Opacity: ${opacity}`);
+    }
+});
+
+ipcMain.handle('save-character-position', async (event, { instanceId, position, rotation, scale, opacity, brightness }) => {
+    try {
+        const info = summonedCharacters.get(instanceId);
+        if (!info) return { success: false, error: '角色未找到' };
+
+        const configPath = path.join(info.modelDir, 'config.json');
+        let config = {};
+        if (fs.existsSync(configPath)) {
+            config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        }
+        if (!config.model) config.model = {};
+        if (position) config.model.position = position;
+        if (rotation) config.model.rotation = rotation;
+        if (scale !== undefined) config.model.scale = scale;
+        if (opacity !== undefined) config.model.opacity = opacity;
+        if (brightness !== undefined) config.model.brightness = brightness;
+        
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
+         console.log(`[Scene] Saved complex state for ${instanceId}`);
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+// ============================================================
+// IPC: 状态转发（场景窗口 -> 控制中心）
 // ============================================================
 
 ipcMain.on('character-status', (event, status) => {
-    // 将角色窗口的状态转发到控制台渲染进程
     if (controlWindow && !controlWindow.isDestroyed()) {
         controlWindow.webContents.send('character-status', status);
     }
 });
 
 // ============================================================
-// IPC: 转发配置更新到角色窗口
+// IPC: 配置更新转发（控制中心 -> 场景窗口）
 // ============================================================
 
 ipcMain.on('update-character-config', (event, { instanceId, config }) => {
-    const win = characterWindows.get(instanceId);
-    if (win && !win.isDestroyed()) {
-        win.webContents.send('update-config', config);
+    if (sceneWindow && !sceneWindow.isDestroyed()) {
+        sceneWindow.webContents.send('update-config', { instanceId, config });
     }
 });
 
@@ -256,32 +293,29 @@ ipcMain.on('update-character-config', (event, { instanceId, config }) => {
 // IPC: 文件系统操作
 // ============================================================
 
-ipcMain.handle('scan-models', async () => {
-    const modelsDir = path.join(__dirname, '..', 'models');
-    const available = [];
+function getModelsDir() {
+    return path.join(__dirname, '..', 'models');
+}
 
+ipcMain.handle('scan-models', async () => {
+    const modelsDir = getModelsDir();
+    const available = [];
     if (!fs.existsSync(modelsDir)) {
         fs.mkdirSync(modelsDir, { recursive: true });
         return available;
     }
-
     const entries = fs.readdirSync(modelsDir, { withFileTypes: true });
-
     for (const entry of entries) {
         if (entry.isDirectory()) {
             const configPath = path.join(modelsDir, entry.name, 'config.json');
             const mappingPath = path.join(modelsDir, entry.name, 'mapping.json');
-
             if (fs.existsSync(configPath)) {
                 try {
                     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
                     const mapping = fs.existsSync(mappingPath)
                         ? JSON.parse(fs.readFileSync(mappingPath, 'utf-8'))
                         : { note_mappings: {} };
-
                     const midiChannel = config.midi?.channel || config.midi_channel || 1;
-                    const midiDevice = config.midi?.device_name || '';
-
                     available.push({
                         id: entry.name,
                         displayName: config.display_name || entry.name,
@@ -289,28 +323,25 @@ ipcMain.handle('scan-models', async () => {
                         mappingPath,
                         modelDir: path.join(modelsDir, entry.name),
                         midiChannel,
-                        midiDevice,
                         hasModel: fs.existsSync(config.model?.pmx_path
                             ? path.resolve(modelsDir, entry.name, config.model.pmx_path)
-                            : path.join(modelsDir, entry.name, `${entry.name}.pmx`)),
+                            : path.join(modelsDir, entry.name, entry.name + '.pmx')),
                         noteCount: Object.keys(mapping.note_mappings || {}).length,
                     });
                 } catch (err) {
-                    console.error(`Error loading config for ${entry.name}:`, err.message);
+                    console.error('Error loading config for', entry.name, err.message);
                 }
             }
         }
     }
-
     return available;
 });
 
 ipcMain.handle('read-mapping', async (event, { modelDir }) => {
     const mappingPath = path.join(modelDir, 'mapping.json');
     if (!fs.existsSync(mappingPath)) return { note_mappings: {} };
-    try {
-        return JSON.parse(fs.readFileSync(mappingPath, 'utf-8'));
-    } catch { return { note_mappings: {} }; }
+    try { return JSON.parse(fs.readFileSync(mappingPath, 'utf-8')); }
+    catch { return { note_mappings: {} }; }
 });
 
 ipcMain.handle('save-mapping', async (event, { modelDir, noteMappings }) => {
@@ -331,11 +362,7 @@ ipcMain.handle('scan-vmd-files', async (event, { modelDir }) => {
             const entries = fs.readdirSync(dir, { withFileTypes: true });
             for (const entry of entries) {
                 if (entry.isFile() && entry.name.toLowerCase().endsWith('.vmd')) {
-                    vmdFiles.push({
-                        name: entry.name,
-                        path: path.join(dir, entry.name),
-                        relativePath: path.relative(modelDir, path.join(dir, entry.name)),
-                    });
+                    vmdFiles.push({ name: entry.name, path: path.join(dir, entry.name), relativePath: path.relative(modelDir, path.join(dir, entry.name)) });
                 }
             }
         }
@@ -346,9 +373,8 @@ ipcMain.handle('scan-vmd-files', async (event, { modelDir }) => {
 ipcMain.handle('read-config', async (event, { modelDir }) => {
     const configPath = path.join(modelDir, 'config.json');
     if (!fs.existsSync(configPath)) return null;
-    try {
-        return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    } catch { return null; }
+    try { return JSON.parse(fs.readFileSync(configPath, 'utf-8')); }
+    catch { return null; }
 });
 
 ipcMain.handle('save-config', async (event, { modelDir, config }) => {
@@ -377,12 +403,10 @@ ipcMain.handle('scan-pmx-files', async (event, { modelDir }) => {
 ipcMain.handle('delete-model', async (event, { modelId, modelDir }) => {
     try {
         if (fs.existsSync(modelDir)) {
-            // 安全起见，检查是否在 models 目录下
             const modelsDir = path.resolve(__dirname, '..', 'models');
             if (!path.resolve(modelDir).startsWith(modelsDir)) {
                 throw new Error('非法删除路径');
             }
-            // 移至系统回收站
             await shell.trashItem(modelDir);
             return { success: true };
         }
@@ -393,85 +417,65 @@ ipcMain.handle('delete-model', async (event, { modelId, modelDir }) => {
 });
 
 ipcMain.handle('create-model', async (event, { modelId, displayName }) => {
-    const modelsDir = path.join(__dirname, '..', 'models');
+    const modelsDir = getModelsDir();
     const modelDir = path.join(modelsDir, modelId);
-
     if (fs.existsSync(modelDir)) {
-        return { success: false, error: `角色 ${modelId} 已存在` };
+        return { success: false, error: '角色 ' + modelId + ' 已存在' };
     }
-
     try {
         fs.mkdirSync(path.join(modelDir, 'actions'), { recursive: true });
-
         const defaultConfig = {
             instance_id: modelId,
             display_name: displayName || modelId,
-            midi: { device_name: "", channel: 1 },
-            model: {
-                pmx_path: `./${modelId}.pmx`,
-                vmd_path: `./idle.vmd`,
-                scale: 1.0,
-                position: { x: 0, y: 0, z: 0 },
-                rotation: { x: 0, y: 0, z: 0 }
-            },
-            window: {
-                width: 600, height: 800,
-                position: { x: 100, y: 100 },
-                always_on_top: true,
-                mouse_through_default: true,
-                drag_modifier_key: "Alt"
-            },
-            idle: {
-                vmd_path: "./idle.vmd",
-                loop: true,
-                blend_time: 0.3
-            },
-            blink: {
-                enabled: true,
-                min_interval: 2000,
-                max_interval: 6000,
-                duration: 120
-            },
+            midi: { device_name: '', channel: 1 },
+            model: { pmx_path: './' + modelId + '.pmx', vmd_path: './idle.vmd', scale: 1.0, position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } },
+            window: { always_on_top: true, mouse_through_default: true },
+            idle: { vmd_path: './idle.vmd', loop: true, blend_time: 0.3 },
+            blink: { enabled: true, min_interval: 2000, max_interval: 6000, duration: 120 },
             audio: { enabled: false, vocal_path: null },
             physics: { enabled: true, gravity: -9.8, substeps: 3 }
         };
-
         fs.writeFileSync(path.join(modelDir, 'config.json'), JSON.stringify(defaultConfig, null, 4), 'utf-8');
         fs.writeFileSync(path.join(modelDir, 'mapping.json'), JSON.stringify({ note_mappings: {} }, null, 4), 'utf-8');
-
         return { success: true, modelDir };
     } catch (err) {
         return { success: false, error: err.message };
     }
 });
 
-// ============================================================
-// IPC: 角色窗口启停（单进程内）
-// ============================================================
+ipcMain.handle('get-screens', async () => {
+    const displays = screen.getAllDisplays();
+    return displays.map(d => ({
+        id: d.id,
+        label: d.label || `Display ${d.id}`,
+        bounds: d.bounds,
+        isPrimary: d.id === screen.getPrimaryDisplay().id
+    }));
+});
 
-ipcMain.handle('start-character', async (event, { instanceId, modelDir, midiChannel }) => {
+ipcMain.handle('read-settings', async () => {
+    const settingsPath = path.join(__dirname, '..', 'settings.json');
+    if (!fs.existsSync(settingsPath)) return {};
     try {
-        createCharacterWindow(instanceId, modelDir, midiChannel);
+        return JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    } catch (e) {
+        return {};
+    }
+});
+
+ipcMain.handle('save-settings', async (event, settings) => {
+    const settingsPath = path.join(__dirname, '..', 'settings.json');
+    try {
+        let current = {};
+        if (fs.existsSync(settingsPath)) {
+            current = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+        }
+        const updated = { ...current, ...settings };
+        fs.writeFileSync(settingsPath, JSON.stringify(updated, null, 4), 'utf-8');
         return { success: true };
     } catch (err) {
         return { success: false, error: err.message };
     }
-});
-
-ipcMain.handle('stop-character', async (event, { instanceId }) => {
-    closeCharacterWindow(instanceId);
-    return { success: true };
-});
-
-ipcMain.handle('get-characters', async () => {
-    const result = [];
-    for (const [instanceId, win] of characterWindows) {
-        result.push({
-            instanceId,
-            status: !win.isDestroyed() ? 'running' : 'stopped',
-        });
-    }
-    return result;
 });
 
 // ============================================================
@@ -481,10 +485,8 @@ ipcMain.handle('get-characters', async () => {
 app.whenReady().then(createControlWindow);
 
 app.on('window-all-closed', () => {
-    for (const [id, win] of characterWindows) {
-        win.close();
-    }
-    characterWindows.clear();
+    if (sceneWindow) { sceneWindow.close(); sceneWindow = null; }
+    summonedCharacters.clear();
     if (process.platform !== 'darwin') app.quit();
 });
 

@@ -14,7 +14,7 @@
  * - 以下配置强制启用 GPU 并优化透明窗口性能
  */
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -59,9 +59,12 @@ const MIDI_CHANNEL = parseInt(args.find(a => a.startsWith('--midi-channel='))?.s
 let mainWindow = null;
 
 function createWindow() {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.bounds;
+
     // 尝试从 config.json 加载保存的位置
-    let savedX = undefined;
-    let savedY = undefined;
+    let savedX = 0;
+    let savedY = 0;
     try {
         const configPath = path.join(MODEL_DIR, 'config.json');
         if (fs.existsSync(configPath)) {
@@ -76,21 +79,22 @@ function createWindow() {
     }
 
     mainWindow = new BrowserWindow({
-        width: 600,
-        height: 800,
+        width: width,
+        height: height,
         x: savedX,
         y: savedY,
         transparent: true,                // ★ 关键：RGBA 背景透明
         frame: false,                     // 无边框
         alwaysOnTop: true,                // 置顶显示
         hasShadow: false,                 // 无窗口阴影
-        type: 'toolbar',                  // 某些 Windows 版本需要
-        focusable: false,                 // 不可获得焦点（避免抢走 DAW 焦点）
+        type: 'toolbar',                  // 某些 Windows 版本 need
+        focusable: false,                 // 不可获得焦点
         skipTaskbar: true,                // 不在任务栏显示
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            sandbox: false,
         },
     });
 

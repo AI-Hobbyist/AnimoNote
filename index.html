@@ -1,46 +1,68 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang=zh-CN>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AnimoNote</title>
+    <title>AnimoNote Scene</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div id="canvas-container"></div>
 
-    <!-- 拖拽提示（仅在按住 Alt 时显示） -->
-    <div id="drag-hint" class="drag-hint hidden">
-        <span>🖱 拖拽移动</span>
-    </div>
+    <!-- 排练模式遮罩 -->
+    <div id="rehearsal-overlay" class="rehearsal-overlay hidden">
+        <div class="rehearsal-toolbar">
+            <div class="rehearsal-title">馃幉 排练模式</div>
+            <div id="transform-info" class="rehearsal-info">点击角色选择 | G:移动 R:旋转 S:缩放 Esc:取消选择</div>
+            <div class="rehearsal-actions">
+                <button id="rehearsal-save-exit-btn" class="rehearsal-btn primary">保存并退出</button>
+            </div>
+        </div>
 
-    <!-- 调试信息（可选，F3 切换） -->
-    <div id="debug-info" class="debug-info hidden">
-        <div id="debug-instance">Instance: --</div>
-        <div id="debug-channel">Channel: --</div>
-        <div id="debug-note">Note: --</div>
-        <div id="debug-fps">FPS: --</div>
-        <div id="debug-brightness">Brightness: 1.0x</div>
-    </div>
+        <!-- 角色属性悬浮窗 -->
+        <div id="character-settings-panel" class="character-settings-panel hidden">
+            <div class="panel-header">角色属性: <span id="current-char-id">无</span></div>
+            
+            <!-- Gizmo 模式切换 -->
+            <div class="setting-item">
+                <label>操作模式</label>
+                <div class="gizmo-mode-group">
+                    <button id="mode-translate" class="mode-btn active" title="移动 (G)">移动</button>
+                    <button id="mode-rotate" class="mode-btn" title="旋转 (R)">旋转</button>
+                    <button id="mode-scale" class="mode-btn" title="缩放 (S)">缩放</button>
+                </div>
+            </div>
 
-    <!-- 亮度提示（调节时短暂显示） -->
-    <div id="brightness-hint" class="drag-hint hidden" style="bottom:60px">
-        <span id="brightness-text">☀️ 亮度: 1.0x</span>
-    </div>
+            <div class="setting-item">
+                <label>缩放</label>
+                <input type="range" id="prop-scale" min="0.1" max="5" step="0.01" value="1">
+                <span id="val-scale">1.0</span>
+            </div>
+            <div class="setting-item">
+                <label>透明度</label>
+                <input type="range" id="prop-opacity" min="0" max="1" step="0.01" value="1">
+                <span id="val-opacity">1.0</span>
+            </div>
+            <div class="setting-item">
+                <label>亮度</label>
+                <input type="range" id="prop-brightness" min="0" max="2" step="0.01" value="1">
+                <span id="val-brightness">1.0</span>
+            </div>
 
-    <!-- 移动控制遮罩（用于移动模式） -->
-    <div id="move-overlay" class="move-full-overlay hidden">
-        <div class="move-drag-area">
-            <div class="move-drag-label">正在移动模型 - 拖动屏幕任意位置</div>
-            <button id="move-done" class="move-done-btn">完成并保存</button>
+            <div class="setting-item reset-group" style="margin-top: 8px">
+                <button id="reset-props" class="rehearsal-btn secondary" title="缩放、透明度、亮度">重置属性</button>
+                <button id="reset-gizmo" class="rehearsal-btn secondary" title="坐标、旋转">重置位置</button>
+                <button id="reset-all" class="rehearsal-btn secondary danger" title="全部恢复默认">全局重置</button>
+            </div>
         </div>
     </div>
 
-    <!--
-        导入映射：将 bare specifier "three" 映射到本地 node_modules 路径。
-        MMDLoader.js / MMDAnimationHelper.js 等依赖内部使用 import { ... } from 'three'，
-        浏览器无法解析 bare specifier，必须通过 importmap 提供映射。
-    -->
+    <!-- 排练模式状态指示（非排练时隐藏） -->
+    <div id="rehearsal-status" class="rehearsal-status-badge hidden">
+        馃幉 排练中
+    </div>
+
+    <!-- 导入映射 -->
     <script type="importmap">
     {
         "imports": {
@@ -50,12 +72,6 @@
     }
     </script>
 
-    <!--
-        ★ 使用 type="module" 确保 import map 生效。
-        renderer.js 内部使用动态 import() 加载 Three.js ES modules，
-        MMDLoader.js / MMDAnimationHelper.js 依赖的 `import { ... } from 'three'`
-        通过上方的 import map 解析到本地 node_modules 路径。
-    -->
     <script type="module" src="renderer.js"></script>
 </body>
 </html>

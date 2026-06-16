@@ -30,21 +30,10 @@
 
             <n-divider vertical />
 
-            <n-text depth="3" style="font-size: 12px">显示屏幕:</n-text>
-            <n-select
-              v-model:value="selectedDisplayId"
-              :options="screenOptions"
-              size="small"
-              placeholder="选择屏幕..."
-              style="width: 200px"
-            />
-
-            <n-divider vertical />
-
-            <n-button type="primary" size="small" @click="handleSummonAll">
+            <n-button type="primary" size="small" @click="handleStartAll">
               ▶ 全部启动
             </n-button>
-            <n-button type="error" size="small" @click="handleRecallAll">
+            <n-button type="error" size="small" @click="handleStopAll">
               ■ 全部停止
             </n-button>
           </n-space>
@@ -121,7 +110,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { darkTheme, zhCN, dateZhCN, NDivider } from 'naive-ui'
+import { darkTheme, zhCN, dateZhCN } from 'naive-ui'
 import { Reload as ReloadIcon, Add as AddIcon } from '@vicons/ionicons5'
 import {
   scanModels,
@@ -129,18 +118,13 @@ import {
   stopAll,
   createModel,
   detectMidiDevices,
-  detectScreens,
-  saveGlobalSettings,
   initIpcListeners,
-  summonedCharacters,
+  runningInstances,
   availableModels,
   midiDeviceList,
-  screenList,
-  selectedDisplayId,
   message,
   dialog,
 } from './composables/useBridge.js'
-import { watch } from 'vue'
 import ModelList from './components/ModelList.vue'
 import InstanceTable from './components/InstanceTable.vue'
 import ConfigEditor from './components/ConfigEditor.vue'
@@ -154,27 +138,11 @@ const newModelId = ref('')
 const newModelName = ref('')
 const selectedMidiDevice = ref(null)
 
-// 监听并保存设置
-watch(selectedMidiDevice, (val) => {
-  saveGlobalSettings({ midi: { deviceName: val || '' } })
-})
-
-watch(selectedDisplayId, (val) => {
-  saveGlobalSettings({ displayId: val })
-})
-
 const midiDeviceOptions = computed(() => {
   return [
     { label: '— 所有设备 —', value: null },
     ...midiDeviceList.value.map(d => ({ label: d.name, value: d.name }))
   ]
-})
-
-const screenOptions = computed(() => {
-  return screenList.value.map(s => ({
-    label: s.label + (s.isPrimary ? ' (主屏)' : ''),
-    value: s.id
-  }))
 })
 
 async function handleDetectMidi() {
@@ -187,12 +155,12 @@ async function handleScan() {
   message.success('扫描完成')
 }
 
-async function handleSummonAll() {
+async function handleStartAll() {
   await startAll()
   message.success('已启动全部角色')
 }
 
-async function handleRecallAll() {
+async function handleStopAll() {
   dialog.warning({
     title: '确认',
     content: '确定要停止所有角色窗口吗？',
@@ -228,21 +196,14 @@ onMounted(async () => {
   initIpcListeners()
   await scanModels()
   await detectMidiDevices()
-  await detectScreens()
-
-  // 加载初始设置
-  const settings = await window.electronAPI.readSettings()
-  if (settings.midi && settings.midi.deviceName) {
-    selectedMidiDevice.value = settings.midi.deviceName
-  }
 
   syncInterval = setInterval(async () => {
     try {
       const api = window.electronAPI
-      if (api?.getSummonedCharacters) {
-        const list = await api.getSummonedCharacters()
+      if (api?.getCharacters) {
+        const list = await api.getCharacters()
         const activeIds = new Set(list.map(i => i.instanceId))
-        const instances = summonedCharacters.value
+        const instances = runningInstances.value
         let changed = false
         for (const [id] of instances) {
           if (!activeIds.has(id)) {
@@ -250,7 +211,7 @@ onMounted(async () => {
             changed = true
           }
         }
-        if (changed) summonedCharacters.value = new Map(instances)
+        if (changed) runningInstances.value = new Map(instances)
       }
     } catch (e) { /* ignore */ }
   }, 2000)
