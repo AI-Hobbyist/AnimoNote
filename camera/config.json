@@ -1,0 +1,16 @@
+{
+    "instance_id": "camera",
+    "display_name": "摄像机",
+    "midi": {
+        "device_name": "",
+        "channel": 1,
+        "mode": "single",
+        "root_note": "C4"
+    },
+    "camera_source": "vmd",
+    "camera_vmd": {
+        "default_vmd": "./actions/default.vmd",
+        "loop": true,
+        "blend_time": 0.3
+    }
+}

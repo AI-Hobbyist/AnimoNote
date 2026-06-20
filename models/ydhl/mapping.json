@@ -1,0 +1,24 @@
+{
+    "note_mappings": {
+        "C3": {
+            "vmd_path": "actions/1.vmd",
+            "fade_duration": 0.1,
+            "fade_in": 0.1,
+            "fade_out": 0.1,
+            "fade_mode": "bpm",
+            "play_mode": "once",
+            "retrigger_mode": "reset",
+            "description": ""
+        },
+        "D3": {
+            "vmd_path": "actions/2.vmd",
+            "fade_duration": 0.1,
+            "fade_in": 0.1,
+            "fade_out": 0.1,
+            "fade_mode": "bpm",
+            "play_mode": "once",
+            "retrigger_mode": "reset",
+            "description": ""
+        }
+    }
+}

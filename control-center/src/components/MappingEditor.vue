@@ -24,8 +24,10 @@
             style="width: 200px"
             filterable
           />
+          <n-button size="small" circle @click="refreshVmdFiles" title="刷新动作列表">
+            🔄
+          </n-button>
           <n-button size="small" type="primary" @click="handleQuickAdd">➕ 快速添加</n-button>
-          <n-button size="small" @click="handleAddRow">➕ 添加</n-button>
           <n-button size="small" type="primary" @click="handleSave">💾 保存</n-button>
         </n-space>
 
@@ -61,6 +63,7 @@ import {
   currentVmdFiles,
   hasUnsavedMapping,
   saveMapping,
+  refreshVmdFiles,
   message,
   dialog,
 } from '../composables/useBridge.js'
@@ -112,17 +115,79 @@ const mappingColumns = [
     }
   },
   {
-    title: '混合',
-    key: 'blend_time',
-    width: 80,
+    title: '淡化模式',
+    key: 'fade_mode',
+    width: 90,
     render(row) {
       const [note, mapping] = row
-      return h(NInput, {
-        value: mapping.blend_time ?? 0.1,
+      return h(NSelect, {
+        value: mapping.fade_mode || 'fixed',
+        options: [
+          { label: '固定值', value: 'fixed' },
+          { label: '节拍', value: 'bpm' },
+        ],
         size: 'small',
-        style: 'width: 60px',
-        onChange: (val) => {
-          updateField(note, 'blend_time', parseFloat(val) || 0.1)
+        'onUpdate:value': (val) => {
+          updateField(note, 'fade_mode', val)
+          if (val === 'fixed') {
+            if (mapping.fade_in === undefined) updateField(note, 'fade_in', mapping.fade_duration ?? 0.1)
+            if (mapping.fade_out === undefined) updateField(note, 'fade_out', mapping.fade_duration ?? 0.1)
+          }
+        }
+      })
+    }
+  },
+  {
+    title: '淡入(秒)',
+    key: 'fade_in',
+    width: 95,
+    render(row) {
+      const [note, mapping] = row
+      if (mapping.fade_mode === 'bpm') return null
+      return h(NInput, {
+        value: mapping.fade_in ?? mapping.fade_duration ?? 0.1,
+        size: 'small',
+        style: 'width: 75px',
+        placeholder: '淡入',
+        onChange: (v) => {
+          updateField(note, 'fade_in', parseFloat(v) || 0.1)
+        }
+      })
+    }
+  },
+  {
+    title: '淡出(秒)',
+    key: 'fade_out',
+    width: 95,
+    render(row) {
+      const [note, mapping] = row
+      if (mapping.fade_mode === 'bpm') return null
+      return h(NInput, {
+        value: mapping.fade_out ?? mapping.fade_duration ?? 0.1,
+        size: 'small',
+        style: 'width: 75px',
+        placeholder: '淡出',
+        onChange: (v) => {
+          updateField(note, 'fade_out', parseFloat(v) || 0.1)
+        }
+      })
+    }
+  },
+  {
+    title: '播放模式',
+    key: 'play_mode',
+    width: 90,
+    render(row) {
+      const [note, mapping] = row
+      return h(NSelect, {
+        value: mapping.play_mode || 'once',
+        options: [
+          { label: '单次', value: 'once' },
+          { label: '循环', value: 'loop' },
+        ],
+        size: 'small',
+        'onUpdate:value': (val) => {
+          updateField(note, 'play_mode', val)
         }
       })
     }
@@ -193,7 +258,7 @@ function handleAddRow() {
   for (const n of ALL_NOTES) {
     if (!used.has(n)) { nn = n; break }
   }
-  currentMappings.value[nn] = { vmd_path: '', blend_time: 0.1, retrigger_mode: 'reset', description: '' }
+  currentMappings.value[nn] = { vmd_path: '', fade_duration: 0.1, fade_in: 0.1, fade_out: 0.1, fade_mode: 'fixed', play_mode: 'once', retrigger_mode: 'reset', description: '' }
   hasUnsavedMapping.value = true
   message.info(`添加映射: ${nn}`)
 }
@@ -219,7 +284,11 @@ function handleQuickAdd() {
   }
   currentMappings.value[quickNote.value] = {
     vmd_path: quickVmd.value,
-    blend_time: 0.1,
+    fade_duration: 0.1,
+    fade_in: 0.1,
+    fade_out: 0.1,
+    fade_mode: 'fixed',
+    play_mode: 'once',
     retrigger_mode: 'reset',
     description: '',
   }

@@ -27,6 +27,7 @@
     "@css-render/plugin-bem": "^0.15.14",
     "@vicons/fluent": "^0.13.0",
     "@vicons/ionicons5": "^0.13.0",
+    "ammo.js": "^0.0.10",
     "css-render": "^0.15.14",
     "date-fns": "^4.4.0",
     "evtd": "^0.2.4",

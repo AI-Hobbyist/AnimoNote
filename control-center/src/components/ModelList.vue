@@ -27,34 +27,56 @@
       </n-flex>
 
       <!-- LCD 状态屏 -->
-      <div v-if="summonedCharacters.has(model.id)" class="model-lcd" :class="{ 'lcd-fallback': insts.get(model.id)?.isFallback }">
-        <div class="lcd-row">
-          <span class="lcd-label">CH</span>
-          <span class="lcd-value lcd-active">
-            {{ String(insts.get(model.id)?.midiChannel || model.midiChannel).padStart(2, '0') }}
-          </span>
-        </div>
-        <div class="lcd-row">
-          <span class="lcd-label">NOTE</span>
-          <span class="lcd-value lcd-note" :class="{ 'lcd-active': insts.get(model.id)?.currentNote }">
-            {{ insts.get(model.id)?.currentNote || '--' }}
-          </span>
-        </div>
-        <div class="lcd-row">
-          <span class="lcd-label">{{ insts.get(model.id)?.isFallback ? 'FALLBACK' : 'ACTION' }}</span>
-          <span class="lcd-value lcd-action" :class="{ 'lcd-active': insts.get(model.id)?.currentAction }">
-            {{ insts.get(model.id)?.currentAction ? insts.get(model.id).currentAction.replace('./actions/', '').replace('.vmd', '') : 'idle' }}
-          </span>
-        </div>
-        <div class="lcd-row lcd-fps">
-          <span class="lcd-label">FPS</span>
-          <span
-            class="lcd-value"
-            :style="{ color: insts.get(model.id)?.fps ? (parseInt(insts.get(model.id).fps) >= 30 ? '#66bb6a' : '#ffca28') : 'rgba(255,255,255,0.15)' }"
-          >
-            {{ insts.get(model.id)?.fps || '--' }} fps
-          </span>
-        </div>
+      <div v-if="summonedCharacters.has(model.id)" class="model-lcd" :class="{ 'lcd-viewing': viewingModeEnabled }">
+        <!-- 观赏模式开启时：统一显示模式状态，不再显示 MIDI 信息 -->
+        <template v-if="viewingModeEnabled">
+          <div class="lcd-row">
+            <span class="lcd-label" style="color: rgba(102,187,106,0.7)">MODE</span>
+            <span class="lcd-value" style="color: #66bb6a; font-size: 12px">
+              🎬 观赏模式
+            </span>
+          </div>
+          <div class="lcd-row">
+            <span class="lcd-label" style="color: rgba(255,255,255,0.25)">STATUS</span>
+            <span class="lcd-value" style="color: rgba(255,255,255,0.5); font-size: 12px">
+              {{ isViewingModePlayingFor(model.id) ? (viewingModeCurrentEntry?.name || '播放中') : '待机中' }}
+            </span>
+          </div>
+        </template>
+        <!-- 普通模式（MIDI） -->
+        <template v-else>
+          <div class="lcd-row">
+            <span class="lcd-label">CH</span>
+            <span class="lcd-value lcd-active">
+              {{ String(insts.get(model.id)?.midiChannel || model.midiChannel).padStart(2, '0') }}
+            </span>
+          </div>
+          <div class="lcd-row">
+            <span class="lcd-label">NOTE</span>
+            <span class="lcd-value lcd-note" :class="{ 'lcd-active': insts.get(model.id)?.currentNote }">
+              {{ insts.get(model.id)?.currentNote || '--' }}
+            </span>
+          </div>
+          <div class="lcd-row">
+            <span class="lcd-label">{{ insts.get(model.id)?.isFallback ? 'FALLBACK' : 'ACTION' }}</span>
+            <span class="lcd-value lcd-action" :class="{ 'lcd-active': insts.get(model.id)?.currentAction }">
+              {{ insts.get(model.id)?.currentAction ? insts.get(model.id).currentAction.split('/').pop().replace('.vmd', '') : 'idle' }}
+            </span>
+          </div>
+          <div class="lcd-row lcd-beat">
+            <span class="lcd-label">BEAT</span>
+            <span
+              class="lcd-value"
+              :style="{
+                color: insts.get(model.id)?.beats
+                  ? (insts.get(model.id).beats >= 0.75 ? '#4fc3f7' : '#ffca28')
+                  : 'rgba(255,255,255,0.15)'
+              }"
+            >
+              {{ insts.get(model.id)?.noteType || (insts.get(model.id)?.beats != null ? insts.get(model.id).beats.toFixed(2) + '拍' : '--') }}
+            </span>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -66,6 +88,8 @@ import {
   availableModels,
   selectedModelId,
   summonedCharacters,
+  viewingModeEnabled,
+  viewingModeCurrentEntry,
   selectModel,
 } from '../composables/useBridge.js'
 
@@ -73,6 +97,13 @@ const emit = defineEmits(['scan'])
 
 // 为每个模型计算其实例状态
 const insts = computed(() => summonedCharacters.value)
+
+/** 判断该角色是否在观赏模式中正被分配播放 */
+function isViewingModePlayingFor(charId) {
+  if (!viewingModeEnabled.value || !viewingModeCurrentEntry.value) return false
+  const cur = viewingModeCurrentEntry.value
+  return cur.characterId === 'global' || cur.characterId === charId
+}
 
 function handleSelect(id) {
   selectModel(id)
@@ -129,6 +160,11 @@ function handleSelect(id) {
 .model-lcd.lcd-fallback {
   border-color: rgba(255, 202, 40, 0.3);
   box-shadow: inset 0 0 8px rgba(255, 202, 40, 0.05);
+}
+
+.model-lcd.lcd-viewing {
+  border-color: rgba(102, 187, 106, 0.3);
+  box-shadow: inset 0 0 8px rgba(102, 187, 106, 0.08);
 }
 
 .lcd-row {

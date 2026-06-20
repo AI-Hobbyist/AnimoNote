@@ -58,7 +58,25 @@
                   />
                 </n-form-item-gi>
                 <n-form-item-gi label="待机 VMD">
-                  <n-input v-model:value="formModel.model.vmd_path" placeholder="./idle.vmd" @update:value="markDirty" />
+                  <n-input-group>
+                    <n-select
+                      v-model:value="formModel.model.vmd_path"
+                      :options="vmdOptions"
+                      placeholder="— 选择待机动作 —"
+                      filterable
+                      clearable
+                      style="flex:1"
+                      @update:value="markDirty"
+                    />
+                    <n-button
+                      type="default"
+                      @click="handleRefreshVmd"
+                      :loading="refreshingVmd"
+                      title="刷新 VMD 文件列表"
+                    >
+                      <template #icon><span>⟳</span></template>
+                    </n-button>
+                  </n-input-group>
                 </n-form-item-gi>
               </n-grid>
             </div>
@@ -69,15 +87,7 @@
             <!-- 窗口 -->
             <div class="config-section">
               <div class="section-title">🪟 窗口</div>
-              <n-grid cols="1 s:2" :x-gap="12" responsive="screen">
-                <n-form-item-gi label="宽度">
-                  <n-input-number v-model:value="formModel.window.width" :min="200" @update:value="markDirty" />
-                </n-form-item-gi>
-                <n-form-item-gi label="高度">
-                  <n-input-number v-model:value="formModel.window.height" :min="200" @update:value="markDirty" />
-                </n-form-item-gi>
-              </n-grid>
-              <n-space style="margin-top: 8px">
+              <n-space>
                 <n-checkbox v-model:checked="formModel.window.always_on_top" @update:checked="markDirty">
                   置顶显示
                 </n-checkbox>
@@ -109,10 +119,46 @@
             </div>
 
             <!-- 物理 -->
-            <div class="config-section last-section">
+            <div class="config-section">
               <div class="section-title">⚡ 物理</div>
               <n-checkbox v-model:checked="formModel.physics.enabled" @update:checked="markDirty">
                 启用刚体物理 (ammo.js)
+              </n-checkbox>
+              <n-grid cols="1 s:2" :x-gap="12" style="margin-top: 8px" responsive="screen">
+                <n-form-item-gi label="重力 (m/s²)">
+                  <n-input-number
+                    v-model:value="formModel.physics.gravity"
+                    :step="0.1"
+                    :min="-50"
+                    :max="0"
+                    :update-value-on-input="false"
+                    @update:value="markDirty"
+                  />
+                </n-form-item-gi>
+                <n-form-item-gi label="子步数 (Substeps)">
+                  <n-input-number
+                    v-model:value="formModel.physics.substeps"
+                    :step="1"
+                    :min="1"
+                    :max="10"
+                    @update:value="markDirty"
+                  />
+                </n-form-item-gi>
+              </n-grid>
+              <n-checkbox
+                v-model:checked="formModel.physics.reset_on_loop"
+                @update:checked="markDirty"
+                style="margin-top: 8px"
+              >
+                循环时重置物理
+              </n-checkbox>
+            </div>
+
+            <!-- 阴影 -->
+            <div class="config-section last-section">
+              <div class="section-title">☂ 阴影</div>
+              <n-checkbox v-model:checked="formModel.shadow.enabled" @update:checked="markDirty">
+                启用角色阴影
               </n-checkbox>
             </div>
           </n-gi>
@@ -127,12 +173,14 @@
 </template>
 
 <script setup>
-import { reactive, computed, watch } from 'vue'
+import { reactive, computed, watch, ref } from 'vue'
 import {
   currentConfig,
   currentPmxFiles,
+  currentVmdFiles,
   midiDeviceList,
   saveConfig,
+  refreshVmdFiles,
   hasUnsavedConfig,
   message,
 } from '../composables/useBridge.js'
@@ -143,10 +191,11 @@ const formModel = reactive({
   display_name: '',
   midi: { device_name: '', channel: 1, mode: 'single', root_note: 'C4' },
   model: { pmx_path: '', vmd_path: '', scale: 1.0, position: { x: 0, y: 0, z: 0 } },
-  window: { width: 600, height: 800, always_on_top: true, mouse_through_default: true },
+  window: { always_on_top: true, mouse_through_default: true },
   idle: { vmd_path: '', loop: true, blend_time: 0.3 },
   blink: { enabled: true, min_interval: 2000, max_interval: 6000, duration: 120 },
-  physics: { enabled: true },
+  physics: { enabled: true, gravity: -9.8, substeps: 3, reset_on_loop: true },
+  shadow: { enabled: true, opacity: 0.45, color: '#000000' },
 })
 
 // 同步配置到表单
@@ -162,13 +211,11 @@ watch(currentConfig, (cfg) => {
   }
   formModel.model = {
     pmx_path: cfg.model?.pmx_path || '',
-    vmd_path: cfg.model?.vmd_path || '',
+    vmd_path: (cfg.model?.vmd_path || '').replace(/^\.\//, ''),
     scale: cfg.model?.scale || 1.0,
     position: { ...cfg.model?.position },
   }
   formModel.window = {
-    width: cfg.window?.width || 600,
-    height: cfg.window?.height || 800,
     always_on_top: cfg.window?.always_on_top !== false,
     mouse_through_default: cfg.window?.mouse_through_default !== false,
   }
@@ -185,6 +232,14 @@ watch(currentConfig, (cfg) => {
   }
   formModel.physics = {
     enabled: cfg.physics?.enabled !== false,
+    gravity: cfg.physics?.gravity ?? -9.8,
+    substeps: cfg.physics?.substeps ?? 3,
+    reset_on_loop: cfg.physics?.reset_on_loop !== false,
+  }
+  formModel.shadow = {
+    enabled: cfg.model?.shadow_enabled !== false,
+    opacity: cfg.model?.shadow_opacity ?? 0.45,
+    color: cfg.model?.shadow_color || '#000000',
   }
 }, { immediate: true, deep: true })
 
@@ -194,6 +249,45 @@ const channelOptions = Array.from({ length: 16 }, (_, i) => ({
 }))
 
 const noteOptions = ALL_NOTES.map(n => ({ label: n, value: n }))
+
+const refreshingVmd = ref(false)
+
+const vmdOptions = computed(() => {
+  const files = currentVmdFiles.value
+  if (!files || files.length === 0) {
+    return [{ label: '(暂无 VMD 文件，请点击 ⟳ 刷新)', value: null, disabled: true }]
+  }
+  // 按目录分组：根目录文件在前，actions/ 子目录在后
+  const rootFiles = files.filter(f => !f.relativePath.startsWith('actions/'))
+  const actionFiles = files.filter(f => f.relativePath.startsWith('actions/'))
+  const opts = []
+  for (const f of rootFiles) {
+    opts.push({ label: f.name, value: f.relativePath })
+  }
+  if (actionFiles.length > 0) {
+    opts.push({
+      type: 'group',
+      label: '📁 actions/',
+      key: 'actions-group',
+      children: actionFiles.map(f => ({ label: f.name, value: f.relativePath })),
+    })
+  }
+  return opts
+})
+
+async function handleRefreshVmd() {
+  refreshingVmd.value = true
+  await refreshVmdFiles()
+  refreshingVmd.value = false
+  // 如果当前值不在新列表里，清空
+  if (formModel.model.vmd_path) {
+    const exists = currentVmdFiles.value.some(f => f.relativePath === formModel.model.vmd_path)
+    if (!exists) {
+      formModel.model.vmd_path = ''
+      markDirty()
+    }
+  }
+}
 
 const modeOptions = [
   { label: '单设备 + 指定通道', value: 'single' },
@@ -223,9 +317,18 @@ function markDirty() {
   currentConfig.value.display_name = formModel.display_name
   currentConfig.value.midi = { ...formModel.midi }
   currentConfig.value.model = { ...formModel.model }
-  currentConfig.value.window = { ...formModel.window }
+  // 同步待机动作：model.vmd_path 作为 idle.vmd_path 的来源
+  formModel.idle.vmd_path = formModel.model.vmd_path || ''
+  currentConfig.value.idle = { ...formModel.idle }
   currentConfig.value.blink = { ...formModel.blink }
   currentConfig.value.physics = { ...formModel.physics }
+  // 阴影设置写入 model 段
+  currentConfig.value.model = {
+    ...currentConfig.value.model,
+    shadow_enabled: formModel.shadow.enabled,
+    shadow_opacity: formModel.shadow.opacity,
+    shadow_color: formModel.shadow.color,
+  }
   hasUnsavedConfig.value = true
 }
 

@@ -16,6 +16,7 @@
             <div id="transform-info" class="rehearsal-info">点击角色选择 | G:移动 R:旋转 S:缩放 Esc:取消选择</div>
             <div class="rehearsal-actions">
                 <button id="rehearsal-save-exit-btn" class="rehearsal-btn primary">保存并退出</button>
+                <button id="rehearsal-reset-camera-btn" class="rehearsal-btn secondary" style="margin-left:6px">重置摄像机</button>
             </div>
         </div>
 
@@ -49,6 +50,31 @@
                 <span id="val-brightness">1.0</span>
             </div>
 
+            <!-- 阴影控制 -->
+            <div class="setting-item shadow-section">
+                <label style="display:flex;align-items:center;gap:8px">
+                    <span>☂ 阴影</span>
+                    <label class="shadow-toggle" style="display:flex;align-items:center;gap:4px;margin-left:auto;font-size:11px;color:rgba(255,255,255,0.7);cursor:pointer">
+                        <input type="checkbox" id="prop-shadow-enabled" checked>
+                        启用
+                    </label>
+                </label>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                    <label style="font-size:10px;color:rgba(255,255,255,0.5);flex-shrink:0">透明度</label>
+                    <input type="range" id="prop-shadow-opacity" min="0" max="1" step="0.01" value="0.45" style="flex:1">
+                    <span id="val-shadow-opacity" style="font-size:10px;color:#4fc3f7;font-family:monospace;min-width:28px;text-align:right">0.45</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                    <label style="font-size:10px;color:rgba(255,255,255,0.5);flex-shrink:0">颜色</label>
+                    <input type="color" id="prop-shadow-color" value="#000000" style="width:100%;height:24px;padding:0;border:1px solid rgba(255,255,255,0.15);border-radius:4px;background:transparent;cursor:pointer">
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                    <label style="font-size:10px;color:rgba(255,255,255,0.5);flex-shrink:0">范围</label>
+                    <input type="range" id="prop-shadow-range" min="10" max="100" step="10" value="100" style="flex:1">
+                    <span id="val-shadow-range" style="font-size:10px;color:#4fc3f7;font-family:monospace;min-width:40px;text-align:right">100</span>
+                </div>
+            </div>
+
             <div class="setting-item reset-group" style="margin-top: 8px">
                 <button id="reset-props" class="rehearsal-btn secondary" title="缩放、透明度、亮度">重置属性</button>
                 <button id="reset-gizmo" class="rehearsal-btn secondary" title="坐标、旋转">重置位置</button>
@@ -62,6 +88,18 @@
         馃幉 排练中
     </div>
 
+    <!-- 调试信息面板（调试模式开启时显示） -->
+    <div id="debug-info" class="debug-info hidden">
+        <div style="color:#66bb6a;font-weight:bold;margin-bottom:6px;font-size:12px">🔧 调试模式</div>
+        <div id="debug-fps"><span class="debug-label">FPS</span> <span class="debug-value">--</span></div>
+        <div id="debug-camera"><span class="debug-label">摄像机</span> <span class="debug-value">--</span></div>
+        <div id="debug-camera-action"><span class="debug-label">动作</span> <span class="debug-value">--</span></div>
+        <div id="debug-characters"><span class="debug-label">角色数</span> <span class="debug-value">0</span></div>
+        <div id="debug-midi"><span class="debug-label">MIDI</span> <span class="debug-value">--</span></div>
+        <div id="debug-bpm"><span class="debug-label">BPM</span> <span class="debug-value">--</span></div>
+        <div id="debug-memory"><span class="debug-label">内存</span> <span class="debug-value">--</span></div>
+    </div>
+
     <!-- 导入映射 -->
     <script type="importmap">
     {
@@ -72,6 +110,7 @@
     }
     </script>
 
+    <script type="module" src="src/bridge.js"></script>
     <script type="module" src="renderer.js"></script>
 </body>
 </html>

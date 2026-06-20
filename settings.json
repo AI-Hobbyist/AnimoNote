@@ -1,23 +1,61 @@
 {
     "midi": {
-        "deviceName": "UMC404HD 192k MIDI In"
+        "deviceName": "loopMIDI Port 1 in"
     },
     "displayId": 917481049,
-    "camera": {
+    "viewingMode": {
+        "enabled": false,
+        "playlists": {
+            "entries": [
+                {
+                    "name": "test",
+                    "vmdPath": "D:\\UserData\\Desktop\\ずうっといっしょ！（永远在一起！）\\永远在一起！.vmd",
+                    "audioPath": "D:\\UserData\\Desktop\\ずうっといっしょ！（永远在一起！）\\永远在一起！wav.wav",
+                    "cameraVmdPath": "D:\\UserData\\Desktop\\ずうっといっしょ！（永远在一起！）\\camera.vmd",
+                    "multiplyX": 1.29,
+                    "multiplyY": 1.58,
+                    "multiplyZ": 1.29,
+                    "assignTo": "global"
+                },
+                {
+                    "name": "test2",
+                    "vmdPath": "D:\\UserData\\Desktop\\mymy麦麦 这叫爱舞蹈挑战_by_圈圈酱_9aea429abe6948284658ed11d5bbf598\\这叫爱舞蹈挑战.vmd",
+                    "audioPath": "D:\\UserData\\Desktop\\mymy麦麦 这叫爱舞蹈挑战_by_圈圈酱_9aea429abe6948284658ed11d5bbf598\\mmexport1780764030157.wav",
+                    "cameraVmdPath": "D:\\UserData\\Desktop\\mymy麦麦 这叫爱舞蹈挑战_by_圈圈酱_9aea429abe6948284658ed11d5bbf598\\相机.vmd",
+                    "multiplyX": 1,
+                    "multiplyY": 1.13,
+                    "multiplyZ": 0.7,
+                    "assignTo": "global"
+                }
+            ]
+        },
+        "playMode": "single"
+    },
+    "rehearsalCamera": {
         "position": {
-            "x": 20.026583341932586,
-            "y": 5.870436678359454,
-            "z": 72.95123673777961
+            "x": -0.24213765596548847,
+            "y": 16.001848976737712,
+            "z": 68.96731866681914
         },
         "rotation": {
-            "x": 0.0383487920642983,
-            "y": -0.10958245861502126,
-            "z": 0.00419598193442839
+            "x": -0.1581897861795131,
+            "y": -0.0034670534920266537,
+            "z": -0.004509683058731386
         },
         "target": {
-            "x": 27.878869999849982,
-            "y": 8.606694855173268,
-            "z": 1.634343634197368
+            "x": 0,
+            "y": 5,
+            "z": 0
         }
+    },
+    "shadow": {
+        "opacity": 0.45,
+        "color": "#000000",
+        "cameraSize": 100
+    },
+    "debug": {
+        "enabled": false,
+        "show_grid": true,
+        "show_info": true
     }
 }

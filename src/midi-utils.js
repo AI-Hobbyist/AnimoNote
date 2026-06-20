@@ -135,7 +135,40 @@ function isValidNoteName(noteName) {
     }
 }
 
+/**
+ * 将音符持续毫秒数 + BPM 转换为标准节拍信息
+ * 
+ * @param {number} durationMs - 音符持续毫秒数
+ * @param {number} bpm - 每分钟拍数
+ * @returns {{ beats: number, type: string }}
+ */
+function calculateBeatsFromTime(durationMs, bpm) {
+    const msPerBeat = 60000 / bpm;
+    const beats = durationMs / msPerBeat;
+
+    let type = '未知';
+    if (Math.abs(beats - 4.0) < 0.2) type = '𝅝 全音符';
+    else if (Math.abs(beats - 2.0) < 0.1) type = '𝅗𝅥 二分音符';
+    else if (Math.abs(beats - 1.0) < 0.05) type = '♩ 四分音符';
+    else if (Math.abs(beats - 0.5) < 0.03) type = '♪ 八分音符';
+    else if (Math.abs(beats - 0.25) < 0.02) type = '♬ 十六分音符';
+    else if (Math.abs(beats - 0.125) < 0.01) type = '𝅘𝅥𝅯 三十二分音符';
+    else if (beats > 0) type = '🎜 切分音';
+
+    return { beats: parseFloat(beats.toFixed(3)), type };
+}
+
 // 导出
+export {
+    midiNoteToName,
+    nameToMidiNote,
+    normalizeNoteName,
+    getOctave,
+    getNoteIndex,
+    isValidNoteName,
+    calculateBeatsFromTime,
+    NOTE_NAMES,
+};
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         midiNoteToName,

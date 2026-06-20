@@ -75,15 +75,19 @@ body {
     position: fixed;
     top: 8px;
     left: 8px;
-    padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.6);
-    border-radius: 6px;
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(102, 187, 106, 0.3);
+    border-radius: 8px;
     font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     font-size: 11px;
-    line-height: 1.6;
-    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.8;
+    color: rgba(255, 255, 255, 0.8);
     pointer-events: none;
     z-index: 100;
+    min-width: 200px;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
 
 .debug-info.hidden {
@@ -92,6 +96,15 @@ body {
 
 .debug-info div {
     white-space: nowrap;
+}
+
+.debug-info .debug-label {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 10px;
+}
+
+.debug-info .debug-value {
+    color: #a5d6a7;
 }
 
 /* ============================================================
@@ -333,6 +346,23 @@ body {
     background: rgba(239, 83, 80, 0.2) !important;
 }
 
+.shadow-section {
+    border-top: 1px solid rgba(79, 195, 247, 0.15);
+    padding-top: 8px;
+    margin-top: 8px;
+}
+
+.shadow-toggle input[type="checkbox"] {
+    accent-color: #4fc3f7;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
+.shadow-toggle:hover {
+    color: #4fc3f7 !important;
+}
+
 .rehearsal-status-badge {
     position: fixed;
     bottom: 12px;
@@ -351,3 +381,4 @@ body {
 .rehearsal-status-badge.hidden {
     display: none;
 }
+

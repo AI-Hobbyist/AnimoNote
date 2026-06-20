@@ -1,0 +1,22 @@
+{
+    "note_mappings": {
+        "C4": {
+            "vmd_path": "actions/1.vmd",
+            "fade_duration": 0.1,
+            "retrigger_mode": "reset",
+            "description": "",
+            "play_mode": "once",
+            "fade_mode": "bpm",
+            "fade_in": 0.1,
+            "fade_out": 0.1
+        },
+        "D4": {
+            "vmd_path": "actions/2.vmd",
+            "fade_duration": 0.1,
+            "retrigger_mode": "reset",
+            "description": "",
+            "play_mode": "once",
+            "fade_mode": "bpm"
+        }
+    }
+}

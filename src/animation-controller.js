@@ -1,11 +1,17 @@
 /**
- * AnimoNote - 动画控制器（含 Retrigger 机制）
+ * AnimoNote - 动画控制器（无泄漏版）
  * 
- * 核心职责：
- * 1. 接收 MIDI 音符触发，播放对应的 VMD 动作
- * 2. 实现 Retrigger 双模式：reset（硬重置）和 smooth（平滑重启）
- * 3. 管理动画生命周期：触发 → 播放 → 释放
- * 4. 防抖保护：防止密集触发导致性能问题
+ * 核心设计原则：永不反复 remove/add 同一模型，避免 Ammo.js WASM 内存泄漏。
+ * 
+ * 问题背景：
+ * MMDAnimationHelper.remove() + add() 循环会导致内部 physics 对象无法正确释放，
+ * Ammo.js WASM heap 逐渐耗尽，最终 "Cannot enlarge memory arrays"。
+ * 
+ * 解决方案：
+ * 1. 触发新动画时绝不 remove 旧的 — 直接 add 新的，Helper 自动 blend 过渡
+ * 2. 旧动画在后台自然播放完毕，weight 归零后不再影响骨骼
+ * 3. 定期批量清理已完成的动画（调用 helper.remove() 集中处理，减少频率）
+ * 4. 防抖 + 最大活跃数限制，防止无限堆积
  */
 
 class AnimationController {
@@ -27,16 +33,39 @@ class AnimationController {
         this.pendingLoads = new Map();
 
         /** @type {MMDLoader} */
-        this.mmdLoader = new THREE.MMDLoader();
+        this.mmdLoader = new window.MMDLoader();
 
         // 配置
-        this.MIN_TRIGGER_INTERVAL = 20;  // 最小触发间隔 (ms)
-        this.DEFAULT_BLEND_TIME = 0.1;   // 默认混合时间 (s)
-        this.DEFAULT_FADE_OUT = 0.05;    // 默认淡出时间 (s)
+        this.MIN_TRIGGER_INTERVAL = 20;   // 最小触发间隔 (ms)
+        this.DEFAULT_FADE_DURATION = 0.1;  // 默认淡入淡出时长 (s)
+        this.DEFAULT_FADE_OUT = 0.05;      // 默认淡出时间 (s)
+        this.MAX_ACTIVE_ANIMATIONS = 32;   // 最大并行动画数，防止无限堆积
+        this.CLEANUP_INTERVAL = 3000;      // 批量清理间隔 (ms)
 
         // 回调
         this.onAnimationStart = null;  // function(noteName, vmdPath)
         this.onAnimationEnd = null;    // function(noteName)
+
+        // 保存骨骼初始姿态，用于动画切换时复位防止物理鬼畜
+        this._initialBoneData = [];
+        if (model && model.skeleton) {
+            for (const bone of model.skeleton.bones) {
+                this._initialBoneData.push({
+                    position: bone.position.clone(),
+                    quaternion: bone.quaternion.clone(),
+                    scale: bone.scale.clone(),
+                });
+            }
+        }
+
+        // 从 mixer 获取待机动画 action，用于触发时压低/恢复
+        this._idleAction = this._findIdleAction();
+
+        // 上一个音符的淡出时长，供下一个音符淡入使用
+        this._lastFadeOut = 0;
+
+        // 上次清理时间戳
+        this._lastCleanupTime = performance.now();
 
         // 统计
         this.stats = {
@@ -44,113 +73,119 @@ class AnimationController {
             retriggers: 0,
             hardResets: 0,
             smoothRestarts: 0,
+            cleanupRuns: 0,
+            cleanedUp: 0,
         };
     }
 
+    // ============================================================
+    // 公开 API
+    // ============================================================
+
     /**
      * 触发音符对应的 VMD 动作
-     *
-     * @param {string} noteName - 音名 (如 "C3", "F#4")
-     * @param {string} vmdPath - VMD 动作文件路径
-     * @param {number} [blendTime=0.1] - 动画混合时间（秒）
-     * @param {string} [retriggerMode='reset'] - 重触发模式: "reset" | "smooth"
-     * @param {boolean} [isFallback=false] - 是否为 fallback 触发（无映射的音符）
-     *
-     * @returns {boolean} 是否成功触发
      */
-    triggerNote(noteName, vmdPath, blendTime = this.DEFAULT_BLEND_TIME, retriggerMode = 'reset', isFallback = false) {
-        // ★ 防抖保护：防止 16 分音符连续触发导致性能问题
+    triggerNote(noteName, vmdPath, fadeDuration = this.DEFAULT_FADE_DURATION, retriggerMode = 'reset', isFallback = false, playMode = 'once', fadeMode = 'fixed', bpm = 120, fadeOut) {
         const now = performance.now();
+
+        // 防抖保护
         const lastTime = this.lastTriggerTime.get(noteName) || 0;
-        if (now - lastTime < this.MIN_TRIGGER_INTERVAL) {
-            return false;  // 过于密集，丢弃本次触发
-        }
+        if (now - lastTime < this.MIN_TRIGGER_INTERVAL) return false;
         this.lastTriggerTime.set(noteName, now);
 
         this.stats.totalTriggers++;
 
+        // 根据淡化模式计算实际过渡时长
+        // 节拍模式：淡入时长 = 上一个音符的淡出时长（保证前后过渡对称）
+        const actualFade = fadeMode === 'bpm'
+            ? Math.max(0.02, this._lastFadeOut || Math.min(fadeDuration, 0.08))
+            : fadeDuration;
+
+        // 触发前先清理已完成动画（批量，非每次触发都清理）
+        this._cleanupCompleted(now);
+
         const existing = this.activeAnimations.get(noteName);
 
         if (existing) {
-            // ★ 同一音符正在播放 → 执行 Retrigger
             this.stats.retriggers++;
-
-            switch (retriggerMode) {
-                case 'reset':
-                    this.stats.hardResets++;
-                    this._hardReset(existing, vmdPath, blendTime);
-                    break;
-                case 'smooth':
-                    this.stats.smoothRestarts++;
-                    this._smoothRestart(existing, vmdPath, blendTime);
-                    break;
-                default:
-                    this._hardReset(existing, vmdPath, blendTime);
+            if (retriggerMode === 'smooth') {
+                this.stats.smoothRestarts++;
+                this._doRetriggerSmooth(existing, vmdPath, actualFade, playMode, fadeMode, bpm, fadeOut);
+            } else {
+                this.stats.hardResets++;
+                this._doRetriggerHard(existing, vmdPath, actualFade, playMode, fadeMode, bpm, fadeOut);
             }
         } else {
-            // 首次触发 → 正常播放
-            this._startNew(noteName, vmdPath, blendTime);
+            this._startNew(noteName, vmdPath, actualFade, playMode, fadeMode, bpm, fadeOut);
         }
 
-        if (this.onAnimationStart) {
-            this.onAnimationStart(noteName, vmdPath);
-        }
+        if (this.onAnimationStart) this.onAnimationStart(noteName, vmdPath);
 
-        // ★ Fallback 自动超时释放：如果是 fallback 动作，200ms 后自动回到 idle
-        if (isFallback) {
-            this._scheduleFallbackRelease(noteName);
-        }
+        if (isFallback) this._scheduleFallbackRelease(noteName);
 
         return true;
     }
 
     /**
-     * 安排 fallback 动作的自动释放
-     * fallback 动作短暂闪烁后自动回到 idle，避免一直卡在 idle 动作上
-     *
-     * @param {string} noteName - 音名
-     * @param {number} [duration=200] - fallback 持续时间（毫秒）
-     */
-    _scheduleFallbackRelease(noteName, duration = 200) {
-        // 清除之前的定时器
-        if (this._fallbackTimers && this._fallbackTimers.has(noteName)) {
-            clearTimeout(this._fallbackTimers.get(noteName));
-        }
-
-        if (!this._fallbackTimers) {
-            this._fallbackTimers = new Map();
-        }
-
-        const timer = setTimeout(() => {
-            this.releaseNote(noteName, 0.05);
-            this._fallbackTimers.delete(noteName);
-        }, duration);
-
-        this._fallbackTimers.set(noteName, timer);
-    }
-
-    /**
-     * 释放音符（Note Off 或超时）
-     * 
-     * @param {string} noteName - 音名
-     * @param {number} [fadeOutTime=0.1] - 淡出时间（秒）
+     * 释放音符（Note Off 或超时）— 淡出完成后才释放 action
      */
     releaseNote(noteName, fadeOutTime = this.DEFAULT_FADE_OUT) {
         const existing = this.activeAnimations.get(noteName);
         if (!existing) return;
 
-        // 淡出后移除
-        this.helper.remove(this.model, existing.vmdAsset, fadeOutTime);
-        this.activeAnimations.delete(noteName);
-
-        if (this.onAnimationEnd) {
-            this.onAnimationEnd(noteName);
+        // 根据模式计算淡出时长
+        let actualFade = fadeOutTime;
+        if (existing.fadeMode === 'bpm' && existing.bpm) {
+            const beatLen = 60 / existing.bpm;
+            const beats = existing.noteBeats || 1.0;
+            actualFade = Math.max(0.02, beats * beatLen);
+        } else if (existing.fadeMode === 'fixed' && existing.noteFadeOut !== undefined) {
+            actualFade = existing.noteFadeOut;
         }
+
+        // 记录淡出日志，并保存供下一个音符淡入使用
+        this._lastFadeOut = actualFade;
+        const beatInfo = existing.noteBeats ? ` | beats: ${existing.noteBeats.toFixed(2)}` : '';
+        console.log(`[Animation] Release: ${noteName} | fadeOut: ${actualFade.toFixed(3)}s${beatInfo}`);
+
+        // 标记为"淡出中"，防止被重触发时的清理误删
+        existing.fadingOut = true;
+
+        // 先开始淡出，让 animation mixer 完成淡出过程
+        if (existing.action) {
+            existing.action.fadeOut(actualFade);
+        }
+
+        // 安排淡出完成后的清理
+        const fadeMs = Math.max(16, actualFade * 1000);
+        this._pendingCleanups = this._pendingCleanups || new Map();
+        if (this._pendingCleanups.has(noteName)) {
+            clearTimeout(this._pendingCleanups.get(noteName));
+        }
+        this._pendingCleanups.set(noteName, setTimeout(() => {
+            this._pendingCleanups.delete(noteName);
+            // 检查是否已被重触发取代（重触发会删除旧的 state）
+            const current = this.activeAnimations.get(noteName);
+            if (current !== existing) return; // 已被新动画取代，跳过清理
+
+            // 淡出完成，真正释放资源
+            try {
+                if (existing.action) existing.action.stop();
+                if (existing.vmdAsset?.dispose) existing.vmdAsset.dispose();
+            } catch (e) { /* ignore */ }
+            this.activeAnimations.delete(noteName);
+
+            // 没有活跃的触发动画了 → 恢复待机动画
+            if (this.activeAnimations.size === 0) {
+                this._restoreIdle();
+            }
+        }, fadeMs));
+
+        if (this.onAnimationEnd) this.onAnimationEnd(noteName);
     }
 
     /**
-     * 释放所有活跃的动画
-     * @param {number} [fadeOutTime=0.1]
+     * 释放所有活跃动画
      */
     releaseAll(fadeOutTime = this.DEFAULT_FADE_OUT) {
         for (const [noteName] of this.activeAnimations) {
@@ -158,111 +193,215 @@ class AnimationController {
         }
     }
 
+    /**
+     * 销毁控制器
+     */
+    dispose() {
+        for (const [, state] of this.activeAnimations) {
+            try {
+                if (state.action) state.action.stop();
+                if (state.vmdAsset?.dispose) state.vmdAsset.dispose();
+            } catch (e) { /* ignore */ }
+        }
+        this.activeAnimations.clear();
+        this.lastTriggerTime.clear();
+        this.pendingLoads.clear();
+        if (this._fallbackTimers) {
+            for (const t of this._fallbackTimers.values()) clearTimeout(t);
+            this._fallbackTimers.clear();
+        }
+        if (this._pendingCleanups) {
+            for (const t of this._pendingCleanups.values()) clearTimeout(t);
+            this._pendingCleanups.clear();
+        }
+        this.mmdLoader = null;
+    }
+
     // ============================================================
-    // Retrigger 模式实现
+    // 核心逻辑
     // ============================================================
 
     /**
-     * 模式 A: 硬重置 (Hard Reset)
-     * 
-     * 立即停止当前动画，将骨骼重置到第 0 帧，然后重新播放。
-     * 适合：打击乐、鼓组、吉他扫弦等需要精确节拍的动作。
-     * 
-     * 视觉表现：瞬间跳回第 0 帧重新播放，无过渡。
-     * 延迟：极低（< 1 帧）
+     * 硬重触发：立即停掉旧动画，从第 0 帧重新播放
      */
-    _hardReset(existing, vmdPath, blendTime) {
-        // 1. 立即停止当前动画
-        this.helper.remove(this.model, existing.vmdAsset, 0);  // 0 = 立即停止
+    _doRetriggerHard(existing, vmdPath, fadeDuration, playMode, fadeMode = 'fixed', bpm = 120, fadeOut) {
+        if (existing.action) existing.action.stop();
+        if (existing.vmdAsset?.dispose) existing.vmdAsset.dispose();
+        this.activeAnimations.delete(existing.noteName);
+        this._resetPhysics();
+        this._loadAndPlay(existing.noteName, vmdPath, fadeDuration, 0, playMode, fadeMode, bpm, fadeOut);
+    }
 
-        // 2. 卸载旧的 VMD 资源
-        if (existing.vmdAsset && existing.vmdAsset.dispose) {
-            existing.vmdAsset.dispose();
+    /**
+     * 平滑重触发：淡出旧动画，淡入新动画
+     */
+    _doRetriggerSmooth(existing, vmdPath, fadeDuration, playMode, fadeMode = 'fixed', bpm = 120, fadeOut) {
+        if (existing.action) existing.action.fadeOut(fadeDuration);
+        this.activeAnimations.delete(existing.noteName);
+        this._resetPhysics();
+        this._loadAndPlay(existing.noteName, vmdPath, fadeDuration, 0, playMode, fadeMode, bpm, fadeOut);
+    }
+
+    /**
+     * 首次触发
+     */
+    _startNew(noteName, vmdPath, fadeDuration, playMode, fadeMode = 'fixed', bpm = 120, fadeOut) {
+        this._resetPhysics();
+        this._loadAndPlay(noteName, vmdPath, fadeDuration, 0, playMode, fadeMode, bpm, fadeOut);
+    }
+
+    /**
+     * 批量清理已完成/待释放的动画
+     * 
+     * 这是关键：把多次 remove 操作集中到一起执行，
+     * 避免每次触发都 remove+add 导致 Ammo.js 内部对象泄漏。
+     */
+    _cleanupCompleted(now) {
+        if (now - this._lastCleanupTime < this.CLEANUP_INTERVAL) return;
+        this._lastCleanupTime = now;
+
+        let cleaned = 0;
+        for (const [noteName, state] of this.activeAnimations) {
+            if (!state.action) continue;
+
+            if (state.pendingRelease) {
+                try {
+                    const fade = state.releaseFadeTime ?? 0;
+                    state.action.fadeOut(fade);
+                    state.action.stop();
+                    if (state.vmdAsset?.dispose) state.vmdAsset.dispose();
+                } catch (e) { /* ignore */ }
+                this.activeAnimations.delete(noteName);
+                cleaned++;
+            }
         }
 
-        // 3. 从活跃列表中移除旧状态
-        this.activeAnimations.delete(existing.noteName);
-
-        // 4. 加载并播放新动画（从第 0 帧开始）
-        this._loadAndPlay(existing.noteName, vmdPath, blendTime, 0);
-    }
-
-    /**
-     * 模式 B: 平滑重启 (Smooth Restart)
-     * 
-     * 不打断当前动画，而是快速淡出当前动作 + 淡入新动作。
-     * 适合：舞蹈动作、旋律连奏、长音等需要视觉连续性的场景。
-     * 
-     * 视觉表现：当前动作快速淡出，新动作淡入，无缝过渡。
-     * 延迟：较低（约 blendTime）
-     */
-    _smoothRestart(existing, vmdPath, blendTime) {
-        // 1. 对当前动画设置快速淡出
-        const fadeOutDuration = Math.min(blendTime, 0.05);  // 快速淡出
-        this.helper.remove(this.model, existing.vmdAsset, fadeOutDuration);
-
-        // 2. 从活跃列表中移除旧状态（但动画仍在淡出中）
-        this.activeAnimations.delete(existing.noteName);
-
-        // 3. 同时开始加载新动画，加载完成后淡入
-        this._loadAndPlay(existing.noteName, vmdPath, blendTime, 0);
-    }
-
-    /**
-     * 开始播放新动画（首次触发）
-     */
-    _startNew(noteName, vmdPath, blendTime) {
-        this._loadAndPlay(noteName, vmdPath, blendTime, 0);
-    }
-
-    /**
-     * 加载 VMD 并播放
-     * 
-     * @param {string} noteName - 音名
-     * @param {string} vmdPath - VMD 文件路径
-     * @param {number} blendTime - 混合时间
-     * @param {number} startFrame - 起始帧（通常为 0）
-     */
-    async _loadAndPlay(noteName, vmdPath, blendTime, startFrame) {
-        // 防止同一音符的重复加载
-        if (this.pendingLoads.has(noteName)) {
-            return;
+        // 超过最大活跃数时强制淘汰最旧的
+        if (this.activeAnimations.size > this.MAX_ACTIVE_ANIMATIONS) {
+            const entries = [...this.activeAnimations.entries()];
+            const toRemove = entries.slice(0, this.activeAnimations.size - this.MAX_ACTIVE_ANIMATIONS);
+            for (const [noteName, state] of toRemove) {
+                try {
+                    state.action.stop();
+                    if (state.vmdAsset?.dispose) state.vmdAsset.dispose();
+                } catch (e) { /* ignore */ }
+                this.activeAnimations.delete(noteName);
+                cleaned++;
+            }
         }
+
+        if (cleaned > 0) {
+            this.stats.cleanupRuns++;
+            this.stats.cleanedUp += cleaned;
+        }
+    }
+
+    // ============================================================
+    // Fallback 释放
+    // ============================================================
+
+    _scheduleFallbackRelease(noteName, duration = 200) {
+        if (this._fallbackTimers?.has(noteName)) {
+            clearTimeout(this._fallbackTimers.get(noteName));
+        }
+        if (!this._fallbackTimers) this._fallbackTimers = new Map();
+
+        const timer = setTimeout(() => {
+            this.releaseNote(noteName, 0.05);
+            this._fallbackTimers.delete(noteName);
+        }, duration);
+        this._fallbackTimers.set(noteName, timer);
+    }
+
+    // ============================================================
+    // 物理复位
+    // ============================================================
+
+    _resetPhysics() {
+        try {
+            if (this.model && this.model.skeleton && this._initialBoneData.length > 0) {
+                const bones = this.model.skeleton.bones;
+                for (let i = 0; i < bones.length && i < this._initialBoneData.length; i++) {
+                    const init = this._initialBoneData[i];
+                    bones[i].position.copy(init.position);
+                    bones[i].quaternion.copy(init.quaternion);
+                    bones[i].scale.copy(init.scale);
+                }
+                this.model.skeleton.update();
+            }
+            const physics = this.helper.physicsMap?.get(this.model);
+            if (physics && typeof physics.reset === 'function') {
+                physics.reset();
+            }
+        } catch (e) { /* 物理重置失败不影响主流程 */ }
+    }
+
+    // ============================================================
+    // VMD 加载 & 播放
+    // ============================================================
+
+    async _loadAndPlay(noteName, vmdPath, fadeDuration, startFrame, playMode = 'once', fadeMode = 'fixed', bpm = 120, fadeOut) {
+        if (this.pendingLoads.has(noteName)) return;
 
         try {
             this.pendingLoads.set(noteName, true);
-
-            // 加载 VMD 动作
             const vmdAsset = await this._loadVmdAsync(vmdPath);
+            if (!this.pendingLoads.has(noteName)) return; // 被取消
 
-            // 检查是否已被新的触发取代
-            if (!this.pendingLoads.has(noteName)) {
-                // 已被取消（新的 hardReset 清除了 pendingLoads）
-                return;
+            // 通过 helper 内部的 AnimationMixer 直接播放，绕过 _addMesh 限制
+            // MMDAnimationHelper.add() 对 SkinnedMesh 永远调用 _addMesh()，
+            // 而已注册的模型再次 _addMesh 会抛错。这里直接操作 mixer。
+            let mixer = this._getMixer();
+            if (!mixer) {
+                // ★ 待机动画尚未 loaded（helper.add 未执行），直接创建 mixer
+                try {
+                    const THREE = window.THREE;
+                    mixer = new THREE.AnimationMixer(this.model);
+                    if (!this.helper.objects) this.helper.objects = new Map();
+                    this.helper.objects.set(this.model, { mixer });
+                    console.log('[Animation] Created mixer on demand for', noteName);
+                } catch (e) {
+                    console.warn('[Animation] Cannot create mixer for', noteName, ':', e.message);
+                    return;
+                }
+            }
+
+            // 压低待机动画，避免叠加
+            this._suppressIdle(fadeDuration);
+
+            // 创建 AnimationAction 并播放
+            const action = mixer.clipAction(vmdAsset);
+            action.reset();
+            action.fadeIn(fadeDuration);
+            if (playMode === 'loop') {
+                action.loop = window.THREE.LoopRepeat; // 循环播放
+            } else {
+                action.loop = window.THREE.LoopOnce;   // 只播放一次
+                action.clampWhenFinished = true;        // 结束后停在最后一帧
+            }
+            action.play();
+
+            // 设置起始帧
+            if (startFrame > 0) {
+                action.time = startFrame / 30; // 假设 30fps
             }
 
             const state = {
                 noteName,
                 vmdAsset,
+                action,
                 startTime: performance.now(),
                 isPlaying: true,
+                pendingRelease: false,
+                releaseFadeTime: 0,
             };
 
+            state.fadeMode = fadeMode;
+            state.bpm = bpm;
+            state.noteBeats = noteName === '_fallback_' ? 0.25 : 1.0;
+            if (fadeOut !== undefined) state.noteFadeOut = fadeOut;
             this.activeAnimations.set(noteName, state);
-
-            // 使用 MMDAnimationHelper 播放
-            this.helper.add(this.model, vmdAsset, {
-                loop: false,           // 不循环（由 Note Off 或超时控制停止）
-                animationBlend: true,  // 启用动画混合
-                blendTime: blendTime,  // 混合时间
-            });
-
-            // 设置起始帧
-            if (startFrame > 0) {
-                this.helper.setAnimationTime(this.model, vmdAsset, startFrame);
-            }
-
-            console.log(`[Animation] Playing: ${noteName} → ${vmdPath} (blend: ${blendTime}s)`);
+            console.log(`[Animation] Playing: ${noteName} → ${vmdPath} | fadeIn: ${fadeDuration.toFixed(3)}s | playMode: ${playMode} | fadeMode: ${fadeMode}${fadeMode === 'bpm' ? ` | BPM: ${bpm}` : ''}`);
 
         } catch (err) {
             console.error(`[Animation] Failed to load VMD for ${noteName}: ${err.message}`);
@@ -272,13 +411,75 @@ class AnimationController {
     }
 
     /**
+     * 获取 helper 内部为当前模型创建的 AnimationMixer
+     */
+    _getMixer() {
+        try {
+            const entry = this.helper.objects?.get(this.model);
+            return entry ? entry.mixer : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // ============================================================
+    // 待机动画管理（防止触发动画与 idle 叠加）
+    // ============================================================
+
+    /**
+     * 查找 mixer 上正在播放的待机动画 action
+     */
+    _findIdleAction() {
+        try {
+            const mixer = this._getMixer();
+            if (!mixer || !mixer._actions) return null;
+            // 取第一个正在运行的 action 作为 idle
+            for (const action of mixer._actions) {
+                if (action.isRunning()) return action;
+            }
+            return null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /**
+     * 淡化待机动画，防止与触发动画叠加
+     */
+    _suppressIdle(fadeDuration) {
+        // 每次触发前重新查找 idle（可能已被之前的操作停掉）
+        const idle = this._findIdleAction();
+        if (idle) {
+            idle.fadeOut(fadeDuration);
+        }
+    }
+
+    /**
+     * 恢复待机动画（所有触发动画都释放后调用）
+     */
+    _restoreIdle() {
+        try {
+            const mixer = this._getMixer();
+            if (!mixer) return;
+
+            // 查找已被淡出的 idle action 并恢复
+            const idle = this._findIdleAction();
+            if (idle) {
+                idle.reset();
+                idle.fadeIn(0.3);
+                idle.play();
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    /**
      * Promise 化的 VMD 加载
      */
     _loadVmdAsync(vmdPath) {
         return new Promise((resolve, reject) => {
             this.mmdLoader.loadAnimation(
                 vmdPath,
-                null,  // 不需要 model，只加载动画数据
+                this.model,  // 传入 model，MMDLoader 需要它来判断动画类型
                 (vmd) => resolve(vmd),
                 null,
                 (error) => reject(error)
@@ -315,19 +516,10 @@ class AnimationController {
         return { ...this.stats, activeAnimations: this.activeAnimations.size };
     }
 
-    /**
-     * 销毁控制器，释放所有资源
-     */
-    dispose() {
-        this.releaseAll(0);
-        this.activeAnimations.clear();
-        this.lastTriggerTime.clear();
-        this.pendingLoads.clear();
-        this.mmdLoader = null;
-    }
 }
 
 // 导出
+export { AnimationController };
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { AnimationController };
 }

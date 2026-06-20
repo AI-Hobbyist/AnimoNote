@@ -38,23 +38,32 @@
               placeholder="选择屏幕..."
               style="width: 200px"
             />
-
-            <n-divider vertical />
-
-            <n-button type="primary" size="small" @click="handleSummonAll">
-              ▶ 全部启动
-            </n-button>
-            <n-button type="error" size="small" @click="handleRecallAll">
-              ■ 全部停止
-            </n-button>
+          <!-- 段码风格 FPS / BPM 屏幕 -->
+          <div class="segment-display-group">
+            <div class="segment-box">
+              <div class="segment-label">FPS</div>
+              <div class="segment-value" :style="{ color: globalFps >= 30 ? '#66bb6a' : '#ffca28' }">
+                {{ String(globalFps).padStart(3, ' ') }}
+              </div>
+            </div>
+            <div class="segment-box">
+              <div class="segment-label">BPM</div>
+              <div class="segment-value" style="color: #4fc3f7">
+                {{ String(globalBpm).padStart(3, ' ') }}
+              </div>
+            </div>
+          </div>
           </n-space>
         </template>
       </n-page-header>
 
       <div class="main-content">
         <!-- 左侧：角色列表 -->
-        <aside class="sidebar">
-          <n-card title="🎭 角色" size="small" :bordered="true" class="sidebar-card">
+        <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+          <div class="sidebar-toggle" @click="sidebarCollapsed = !sidebarCollapsed" title="切换侧栏">
+            <span class="sidebar-toggle-icon">{{ sidebarCollapsed ? '▶' : '◀' }}</span>
+          </div>
+          <n-card title="🎭 角色" size="small" :bordered="true" class="sidebar-card" v-show="!sidebarCollapsed">
             <template #header-extra>
               <n-button size="tiny" circle @click="showNewModelModal = true">
                 <template #icon><n-icon><AddIcon /></n-icon></template>
@@ -72,6 +81,8 @@
                 <n-tab name="instances">📋 实例</n-tab>
                 <n-tab name="config">⚙️ 角色配置</n-tab>
                 <n-tab name="mapping">🎼 映射</n-tab>
+                <n-tab name="camera">🎥 摄像机</n-tab>
+                <n-tab name="mmd">🎬 MMD观赏</n-tab>
               </n-tabs>
             </template>
 
@@ -89,11 +100,29 @@
             <div v-show="activeTab === 'mapping'" class="tab-pane">
               <MappingEditor />
             </div>
+
+            <!-- 摄像机配置 -->
+            <div v-show="activeTab === 'camera'" class="tab-pane">
+              <CameraConfigEditor />
+            </div>
+
+            <!-- MMD 观赏模式 -->
+            <div v-show="activeTab === 'mmd'" class="tab-pane">
+              <MmdViewer />
+            </div>
           </n-card>
 
           <!-- 日志面板 -->
-          <n-card title="📝 日志" size="small" :bordered="true" class="log-card">
-            <LogPanel />
+          <n-card size="small" :bordered="true" class="log-card" :class="{ collapsed: logCollapsed }">
+            <template #header>
+              <div class="log-header" @click="logCollapsed = !logCollapsed" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none">
+                <n-text strong style="font-size: 13px">📝 日志</n-text>
+                <n-text depth="3" style="font-size: 11px">{{ logCollapsed ? '▶ 展开' : '▼ 收起' }}</n-text>
+              </div>
+            </template>
+            <div v-show="!logCollapsed" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+              <LogPanel />
+            </div>
           </n-card>
         </main>
       </div>
@@ -134,6 +163,8 @@ import {
   initIpcListeners,
   summonedCharacters,
   availableModels,
+  globalBpm,
+  globalFps,
   midiDeviceList,
   screenList,
   selectedDisplayId,
@@ -145,11 +176,15 @@ import ModelList from './components/ModelList.vue'
 import InstanceTable from './components/InstanceTable.vue'
 import ConfigEditor from './components/ConfigEditor.vue'
 import MappingEditor from './components/MappingEditor.vue'
+import CameraConfigEditor from './components/CameraConfigEditor.vue'
+import MmdViewer from './components/MmdViewer.vue'
 import LogPanel from './components/LogPanel.vue'
 
 const theme = ref(darkTheme)
 const activeTab = ref('instances')
 const showNewModelModal = ref(false)
+const logCollapsed = ref(false)
+const sidebarCollapsed = ref(false)
 const newModelId = ref('')
 const newModelName = ref('')
 const selectedMidiDevice = ref(null)
@@ -311,17 +346,63 @@ html, body, #app {
   min-width: 240px;
   display: flex;
   flex-direction: column;
-  padding: 12px;
+  padding: 12px 12px 12px 4px;
   background: #16213e;
   border-right: 1px solid var(--border-color);
-  overflow-y: auto;
+  overflow: hidden;
   min-height: 0;
+  transition: min-width 0.2s ease, padding 0.2s ease;
+  position: relative;
+}
+
+.sidebar.collapsed {
+  min-width: 24px;
+  width: 24px;
+  padding: 12px 2px;
+}
+
+.sidebar-toggle {
+  position: absolute;
+  top: 12px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+  transition: background 0.15s;
+  z-index: 10;
+}
+
+.sidebar.collapsed .sidebar-toggle {
+  right: 2px;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+.sidebar-toggle-icon {
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+  transition: color 0.15s;
+}
+
+.sidebar-toggle:hover .sidebar-toggle-icon {
+  color: #4fc3f7;
 }
 
 @media (max-width: 768px) {
   .sidebar {
     width: 200px;
     min-width: 200px;
+  }
+  .sidebar.collapsed {
+    min-width: 24px;
+    width: 24px;
   }
 }
 
@@ -354,6 +435,7 @@ html, body, #app {
   flex-direction: column;
   overflow: hidden;
   min-height: 0;
+  max-height: 100%;
 }
 
 .content-card .n-card__content {
@@ -363,28 +445,40 @@ html, body, #app {
   overflow: hidden;
   padding: 0;
   min-height: 0;
+  max-height: 100%;
 }
 
 .tab-pane {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
   padding: 12px;
   min-height: 0;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
 }
 
 .log-card {
-  height: 160px;
+  flex: 0 0 160px;
   min-height: 160px;
   display: flex;
   flex-direction: column;
+  transition: flex 0.2s ease, min-height 0.2s ease;
+  overflow: hidden;
+}
+
+.log-card.collapsed {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 .log-card .n-card__content {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   padding: 0;
+  min-height: 0;
 }
 
 /* 滚动条 */
@@ -401,5 +495,41 @@ html, body, #app {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* ============================================================
+   段码风格 FPS / BPM 屏幕
+   ============================================================ */
+.segment-display-group {
+  display: flex;
+  gap: 8px;
+  margin-right: 16px;
+}
+
+.segment-box {
+  background: #0d0d1a;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 4px 10px;
+  text-align: center;
+  min-width: 72px;
+}
+
+.segment-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: rgba(255, 255, 255, 0.3);
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.segment-value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-shadow: 0 0 8px currentColor;
+  letter-spacing: 2px;
 }
 </style>

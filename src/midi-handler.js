@@ -165,8 +165,10 @@ class MidiHandler {
                 midiNote,
                 velocity,
                 vmdPath: mapping.vmd_path,
-                blendTime: mapping.blend_time || 0.1,
+                blendTime: mapping.fade_duration ?? 0.1,
                 retriggerMode: mapping.retrigger_mode || 'reset',
+                playMode: mapping.play_mode || 'once',
+                fadeMode: mapping.fade_mode || 'fixed',
                 isFallback: false,
             });
         }
@@ -229,6 +231,7 @@ class MidiHandler {
 }
 
 // 导出
+export { MidiHandler };
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { MidiHandler };
 }
