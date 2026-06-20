@@ -27,11 +27,10 @@ npm-debug.log*
 .env
 .env.local
 
-# Model files (large binaries, should be managed separately)
-*.pmx
-*.vmd
-*.pmd
-*.x
+# Model files (ignore everything, keep only .keep)
+models/**
+!models/.keep
+!models/**/.keep
 
 # Config overrides (user-specific)
 config.local.json
