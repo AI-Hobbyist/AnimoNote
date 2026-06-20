@@ -28,7 +28,7 @@ npm-debug.log*
 .env.local
 
 # Model files (ignore everything, keep only .keep)
-models/**
+models/*
 !models/.keep
 !models/**/.keep
 
