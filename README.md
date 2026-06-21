@@ -316,16 +316,21 @@ npm run start:dev
     "deviceName": "loopMIDI Port 1 in"
   },
   "displayId": 917481049,
-  "viewingMode": {
-    "enabled": false,
-    "playlists": { "entries": [] },
-    "playMode": "single"
-  },
   "debug": {
     "enabled": false,
     "show_grid": true,
     "show_info": true
   }
+}
+```
+
+### 观赏模式配置 (`viewing.json`)
+
+```json
+{
+  "enabled": false,
+  "playlists": { "entries": [] },
+  "playMode": "single"
 }
 ```
 

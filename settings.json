@@ -3,34 +3,6 @@
         "deviceName": "loopMIDI Port 1 in"
     },
     "displayId": 917481049,
-    "viewingMode": {
-        "enabled": false,
-        "playlists": {
-            "entries": [
-                {
-                    "name": "test",
-                    "vmdPath": "D:\\UserData\\Desktop\\ずうっといっしょ！（永远在一起！）\\永远在一起！.vmd",
-                    "audioPath": "D:\\UserData\\Desktop\\ずうっといっしょ！（永远在一起！）\\永远在一起！wav.wav",
-                    "cameraVmdPath": "D:\\UserData\\Desktop\\ずうっといっしょ！（永远在一起！）\\camera.vmd",
-                    "multiplyX": 1.29,
-                    "multiplyY": 1.58,
-                    "multiplyZ": 1.29,
-                    "assignTo": "global"
-                },
-                {
-                    "name": "test2",
-                    "vmdPath": "D:\\UserData\\Desktop\\mymy麦麦 这叫爱舞蹈挑战_by_圈圈酱_9aea429abe6948284658ed11d5bbf598\\这叫爱舞蹈挑战.vmd",
-                    "audioPath": "D:\\UserData\\Desktop\\mymy麦麦 这叫爱舞蹈挑战_by_圈圈酱_9aea429abe6948284658ed11d5bbf598\\mmexport1780764030157.wav",
-                    "cameraVmdPath": "D:\\UserData\\Desktop\\mymy麦麦 这叫爱舞蹈挑战_by_圈圈酱_9aea429abe6948284658ed11d5bbf598\\相机.vmd",
-                    "multiplyX": 1,
-                    "multiplyY": 1.13,
-                    "multiplyZ": 0.7,
-                    "assignTo": "global"
-                }
-            ]
-        },
-        "playMode": "single"
-    },
     "rehearsalCamera": {
         "position": {
             "x": -0.24213765596548847,

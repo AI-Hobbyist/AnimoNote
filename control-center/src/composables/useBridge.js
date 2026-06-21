@@ -546,12 +546,11 @@ export function getSelectedModel() {
  */
 export async function loadViewingModeConfig() {
   try {
-    const settings = await api().readSettings()
-    const vm = settings.viewingMode
-    if (vm) {
-      viewingModeEnabled.value = vm.enabled || false
-      viewingModePlaylists.value = migratePlaylistFormat(vm.playlists || {})
-      viewingModePlayMode.value = vm.playMode || 'list-loop'
+    const config = await api().readViewingConfig()
+    if (config) {
+      viewingModeEnabled.value = config.enabled || false
+      viewingModePlaylists.value = migratePlaylistFormat(config.playlists || {})
+      viewingModePlayMode.value = config.playMode || 'list-loop'
     }
   } catch (e) {
     console.error('Failed to load viewing mode config:', e)
@@ -593,13 +592,11 @@ export async function saveViewingModeConfig() {
       assignTo: e.assignTo || 'global',
     }))
     const payload = {
-      viewingMode: {
-        enabled: viewingModeEnabled.value,
-        playlists: { entries: cleanEntries },
-        playMode: viewingModePlayMode.value,
-      }
+      enabled: viewingModeEnabled.value,
+      playlists: { entries: cleanEntries },
+      playMode: viewingModePlayMode.value,
     }
-    await api().saveSettings(payload)
+    await api().saveViewingConfig(payload)
   } catch (e) {
     console.error('Failed to save viewing mode config:', e)
   }

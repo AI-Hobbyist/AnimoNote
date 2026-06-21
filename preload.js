@@ -22,6 +22,8 @@ const controlCenterAPI = {
   getScreens: () => ipcRenderer.invoke('get-screens'),
   readSettings: () => ipcRenderer.invoke('read-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  readViewingConfig: () => ipcRenderer.invoke('read-viewing-config'),
+  saveViewingConfig: (config) => ipcRenderer.invoke('save-viewing-config', config),
   updateCharacterConfig: (params) => ipcRenderer.send('update-character-config', params),
   updateMappings: (params) => ipcRenderer.send('update-mappings', params),
   onCharacterClosed: (callback) => { ipcRenderer.on('character-closed', (event, data) => callback(data)); },

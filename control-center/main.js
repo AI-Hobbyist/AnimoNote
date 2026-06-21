@@ -585,6 +585,35 @@ ipcMain.handle('save-settings', async (event, settings) => {
 });
 
 // ============================================================
+// IPC: 观赏模式配置 (viewing.json)
+// ============================================================
+
+ipcMain.handle('read-viewing-config', async () => {
+    const viewingPath = path.join(__dirname, '..', 'viewing.json');
+    if (!fs.existsSync(viewingPath)) return {};
+    try {
+        return JSON.parse(fs.readFileSync(viewingPath, 'utf-8'));
+    } catch (e) {
+        return {};
+    }
+});
+
+ipcMain.handle('save-viewing-config', async (event, config) => {
+    const viewingPath = path.join(__dirname, '..', 'viewing.json');
+    try {
+        let current = {};
+        if (fs.existsSync(viewingPath)) {
+            current = JSON.parse(fs.readFileSync(viewingPath, 'utf-8'));
+        }
+        const updated = { ...current, ...config };
+        fs.writeFileSync(viewingPath, JSON.stringify(updated, null, 4), 'utf-8');
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+// ============================================================
 // IPC: 摄像机模块
 // ============================================================
 
